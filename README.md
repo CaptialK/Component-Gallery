@@ -1,4 +1,4 @@
-# `>>> SITE_NAME <<<`
+# V's Component Gallery
 
 A working sketchbook of hand-designed SaaS UI components — paper-toned base,
 with a measured pointillism accent. In the spirit of devl.dev, with a different
@@ -103,7 +103,6 @@ the hero. Tokens are exposed as Tailwind utilities (e.g. `bg-bg`, `text-text`,
 These literal strings live throughout the codebase and will be swapped in
 finalization:
 
-- `>>> SITE_NAME <<<`
 - `>>> GITHUB_USERNAME <<<`
 - `>>> AUTHOR_NAME <<<`
 - `>>> SITE_URL <<<`

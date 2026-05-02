@@ -28,8 +28,7 @@ export function BrandMark({ size = 22 }: { size?: number }) {
         />
       </span>
       <span className="font-mono text-[13px] tracking-tight text-[var(--color-text)]">
-        {/* Brand name placeholder — swap during finalization. */}
-        {">>> SITE_NAME <<<"}
+        V&apos;s Component Gallery
       </span>
     </span>
   );

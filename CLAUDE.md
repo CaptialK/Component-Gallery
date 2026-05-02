@@ -133,7 +133,6 @@ declaring done. The build statically prerenders every registry entry.
 These strings live throughout the codebase and will be swapped at finalization.
 Do not invent values for them.
 
-- `>>> SITE_NAME <<<`
 - `>>> GITHUB_USERNAME <<<`
 - `>>> AUTHOR_NAME <<<`
 - `>>> SITE_URL <<<`

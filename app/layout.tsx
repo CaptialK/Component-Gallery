@@ -15,7 +15,7 @@ const jetbrainsMono = JetBrains_Mono({
   display: "swap",
 });
 
-const SITE_NAME = ">>> SITE_NAME <<<";
+const SITE_NAME = "V's Component Gallery";
 const SITE_URL = ">>> SITE_URL <<<";
 const AUTHOR = ">>> AUTHOR_NAME <<<";
 
