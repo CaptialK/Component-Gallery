@@ -103,6 +103,4 @@ the hero. Tokens are exposed as Tailwind utilities (e.g. `bg-bg`, `text-text`,
 These literal strings live throughout the codebase and will be swapped in
 finalization:
 
-- `>>> GITHUB_USERNAME <<<`
-- `>>> AUTHOR_NAME <<<`
-- `>>> SITE_URL <<<`
+- `>>> SITE_URL <<<` (TBD — gallery will live under vinsonfx.com once that monorepo lands)

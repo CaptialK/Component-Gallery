@@ -14,14 +14,14 @@ export function SiteFooter() {
           <span>
             {`built by `}
             <span className="text-[var(--color-text)]">
-              {">>> AUTHOR_NAME <<<"}
+              Vinson
             </span>
           </span>
           <span aria-hidden>·</span>
           <span>{year}</span>
           <span aria-hidden>·</span>
           <Link
-            href="https://github.com/>>> GITHUB_USERNAME <<<"
+            href="https://github.com/CapitalK"
             className="hover:text-[var(--color-text)]"
           >
             github

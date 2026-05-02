@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 
 const SITE_NAME = "V's Component Gallery";
 const SITE_URL = ">>> SITE_URL <<<";
-const AUTHOR = ">>> AUTHOR_NAME <<<";
+const AUTHOR = "Vinson";
 
 export const metadata: Metadata = {
   metadataBase: new URL(

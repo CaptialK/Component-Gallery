@@ -133,6 +133,4 @@ declaring done. The build statically prerenders every registry entry.
 These strings live throughout the codebase and will be swapped at finalization.
 Do not invent values for them.
 
-- `>>> GITHUB_USERNAME <<<`
-- `>>> AUTHOR_NAME <<<`
-- `>>> SITE_URL <<<`
+- `>>> SITE_URL <<<` (TBD — gallery will live under vinsonfx.com once that monorepo lands)

@@ -34,7 +34,7 @@ export function SiteHeader() {
             </kbd>
           </button>
           <a
-            href="https://github.com/>>> GITHUB_USERNAME <<<"
+            href="https://github.com/CapitalK"
             target="_blank"
             rel="noreferrer"
             aria-label="GitHub repository"
