@@ -37,11 +37,13 @@ export function SpecimenShell({
   entry,
   plateNumber,
   source,
+  aspectRatio = "5 / 6",
   children,
 }: {
   entry: EntryShape;
   plateNumber: string;
   source: React.ReactNode;
+  aspectRatio?: string;
   children: React.ReactNode;
 }) {
   const [sourceOpen, setSourceOpen] = React.useState(false);
@@ -97,7 +99,7 @@ export function SpecimenShell({
         <div
           data-plate={entry.slug}
           className="relative w-full max-w-[600px]"
-          style={{ aspectRatio: "5 / 6" }}
+          style={{ aspectRatio }}
         >
           {/* Left-margin № watermark — lg+ only. */}
           <div

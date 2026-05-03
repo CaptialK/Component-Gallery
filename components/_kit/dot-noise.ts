@@ -28,7 +28,7 @@ export type PoissonOptions = {
   seed?: number;
 };
 
-function mulberry32(seed: number) {
+export function mulberry32(seed: number) {
   let t = seed >>> 0;
   return () => {
     t = (t + 0x6d2b79f5) >>> 0;

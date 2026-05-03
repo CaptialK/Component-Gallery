@@ -68,6 +68,7 @@ export default async function ComponentPage({
         entry={entryShape}
         plateNumber={plateNumber}
         source={<SourceViewer code={source} />}
+        aspectRatio={entry.aspectRatio}
       >
         <Loaded />
       </SpecimenShell>

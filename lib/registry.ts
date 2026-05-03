@@ -14,6 +14,13 @@ export type ComponentEntry = {
    * foot-of-page colophon, marginalia code reveal.
    */
   layout?: "specimen" | "default";
+  /**
+   * Plate aspect ratio for `layout: "specimen"`. Defaults to "5 / 6" — the
+   * portrait shape that suits auth, empty-states, etc. Dashboards and other
+   * landscape-natural components override (e.g. "4 / 3"). Ignored for
+   * `default` layout.
+   */
+  aspectRatio?: string;
   load: () => Promise<{ default: ComponentType }>;
 };
 
@@ -55,6 +62,17 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Pointillism illustration, paired with a clear primary action.",
     load: () => import("@/components/showcase/empty-states/inbox-zero"),
+  },
+  {
+    category: "dashboards",
+    slug: "activity-heatmap",
+    title: "Activity heatmap",
+    filename: "activity-heatmap.tsx",
+    description:
+      "Density-as-data: each cell is a Bridson dot cluster whose count maps to the day's value via the print-canon coverage formula.",
+    layout: "specimen",
+    aspectRatio: "4 / 3",
+    load: () => import("@/components/showcase/dashboards/activity-heatmap"),
   },
 ];
 
@@ -98,6 +116,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   auth: "Authentication",
   layouts: "Layouts",
   "empty-states": "Empty states",
+  dashboards: "Dashboards",
 };
 
 export function getCategoryLabel(slug: string): string {
