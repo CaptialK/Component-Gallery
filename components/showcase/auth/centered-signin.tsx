@@ -29,10 +29,7 @@ export default function CenteredSignin() {
         </h1>
         <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
           New here?{" "}
-          <a
-            href="#"
-            className="text-[var(--color-text)] underline-offset-4 hover:underline"
-          >
+          <a href="#" className="link text-[var(--color-text)]">
             Create an account
           </a>
           .
@@ -54,10 +51,7 @@ export default function CenteredSignin() {
             label="Password"
             htmlFor="password"
             aside={
-              <a
-                href="#"
-                className="text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
-              >
+              <a href="#" className="link text-[var(--color-text-muted)]">
                 Forgot?
               </a>
             }
@@ -112,17 +106,11 @@ export default function CenteredSignin() {
 
         <p className="mt-8 text-center text-[11px] text-[var(--color-text-muted)]">
           By continuing you agree to our{" "}
-          <a
-            href="#"
-            className="underline-offset-4 hover:text-[var(--color-text)] hover:underline"
-          >
+          <a href="#" className="link">
             Terms
           </a>{" "}
           and{" "}
-          <a
-            href="#"
-            className="underline-offset-4 hover:text-[var(--color-text)] hover:underline"
-          >
+          <a href="#" className="link">
             Privacy Policy
           </a>
           .

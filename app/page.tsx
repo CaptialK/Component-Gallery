@@ -3,6 +3,7 @@ import { ArrowUpRight } from "lucide-react";
 import { SiteHeader } from "@/components/_kit/site-header";
 import { SiteFooter } from "@/components/_kit/site-footer";
 import { DotField } from "@/components/_kit/dot-field";
+import { Skeleton } from "@/components/_kit/skeleton";
 import { groupByCategory, type ComponentEntry } from "@/lib/registry";
 
 export default function HomePage() {
@@ -61,10 +62,10 @@ function Hero() {
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--color-accent)]" />
           gallery · phase 1
         </span>
-        <h1 className="mt-4 max-w-[18ch] text-3xl font-semibold leading-[1.1] tracking-[-0.02em] text-[var(--color-text)] md:text-[44px] md:leading-[1.05]">
+        <h1 className="display mt-4 max-w-[18ch] text-[44px] leading-[1.02] tracking-[-0.022em] text-[var(--color-text)] md:text-[60px]">
           Hand-designed
           <br />
-          <span className="text-[var(--color-text-muted)]">SaaS components,</span>
+          <span className="italic text-[var(--color-text-muted)]">SaaS components,</span>
           <br />
           one file at a time.
         </h1>
@@ -145,20 +146,18 @@ function ComponentCard({ entry }: { entry: ComponentEntry }) {
 }
 
 function PreviewPlaceholder({ seed }: { seed: number }) {
+  // Spike 1: blue-noise stipple at low density. Reads as "loading / not yet
+  // pressed" — same dot language, just quieter than the rendered state.
   return (
-    <div className="absolute inset-0 grid place-items-center">
-      <div className="h-full w-full opacity-50">
-        <DotField
-          shape={{ kind: "rect", width: 300, height: 220 }}
-          spacing={5}
-          dotRadius={1.1}
-          baseDensity={0.55}
-          accentRatio={0.12}
-          seed={seed}
-          density={(x, _y, w, h) => 0.4 + 0.6 * (1 - Math.abs((x - w / 2) / w))}
-          className="h-full w-full"
-        />
-      </div>
+    <div className="absolute inset-0">
+      <Skeleton
+        width={300}
+        height={220}
+        density={0.06}
+        spacing={5}
+        seed={seed}
+        className="h-full w-full"
+      />
       <span className="absolute bottom-2 left-2 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
         preview pending
       </span>

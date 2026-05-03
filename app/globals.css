@@ -1,37 +1,45 @@
 @import "tailwindcss";
 
-/* ---------- DESIGN TOKENS ---------- */
-/* Tailwind v4 CSS-first config — every token below becomes a utility prefix
-   (e.g. --color-bg → bg-bg, --radius-card → rounded-card). */
+/* ---------- DESIGN TOKENS ----------
+   Tailwind v4 CSS-first config. Every token below becomes a utility prefix
+   (e.g. --color-bg → bg-bg). Spike 1 swaps the palette to the Folio direction:
+   warm cream paper, walnut foreground, burnt persimmon (low-chroma, ochre-
+   shifted), and Federal Blue as the second ink. */
 
 @theme {
-  /* Fonts. Inter for UI, JetBrains Mono for code. Loaded via next/font. */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+  /* Fonts. Fraunces (display) + Geist Sans (body) + Geist Mono (code).
+     The actual font-family vars come from next/font/google in app/layout.tsx. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
     "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, Menlo,
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
     Consolas, "Liberation Mono", monospace;
+  --font-display: var(--font-fraunces), Georgia, "Times New Roman", serif;
 
-  /* Base colors — Vercel/Notion paper-toned. Defined under .light by default. */
-  --color-bg: oklch(98.5% 0.005 90);
-  --color-surface: oklch(100% 0 0);
-  --color-surface-2: oklch(96.5% 0.006 85);
-  --color-border: oklch(91% 0.005 85);
-  --color-border-strong: oklch(82% 0.006 85);
-  --color-text: oklch(20% 0.01 80);
-  --color-text-muted: oklch(48% 0.008 80);
+  /* Folio palette — light. */
+  --color-bg: oklch(96.5% 0.012 85);          /* warm cream */
+  --color-surface: oklch(98.2% 0.008 85);     /* lifted paper */
+  --color-surface-2: oklch(94% 0.014 82);     /* secondary panel */
+  --color-border: oklch(89% 0.014 80);
+  --color-border-strong: oklch(78% 0.018 78);
+  --color-text: oklch(22% 0.025 65);          /* deep walnut */
+  --color-text-muted: oklch(48% 0.020 70);
 
-  /* Accent — deep terracotta/persimmon, Seurat-leaning. */
-  --color-accent: oklch(58% 0.18 25);
-  --color-accent-fg: oklch(98% 0.005 90);
+  /* Persimmon — burnt, ochre-shifted (lower chroma, hue 45 not 25). */
+  --color-accent: oklch(58% 0.14 45);
+  --color-accent-fg: oklch(96.5% 0.012 85);
+
+  /* The second ink — Federal Blue. Dot work and selection live here. */
+  --color-accent-2: oklch(38% 0.07 250);
 
   /* Status. */
-  --color-success: oklch(60% 0.13 145);
-  --color-danger: oklch(58% 0.20 25);
-  --color-warning: oklch(72% 0.15 75);
+  --color-success: oklch(56% 0.10 145);
+  --color-danger: oklch(54% 0.16 28);
+  --color-warning: oklch(70% 0.14 75);
 
   /* Pointillism — these resolve to base tokens so they follow the theme. */
   --color-dot-ink: var(--color-text);
   --color-dot-accent: var(--color-accent);
+  --color-dot-second: var(--color-accent-2);
 
   /* Radii — vary intentionally. The default `--radius` does not exist on purpose. */
   --radius-xs: 4px;
@@ -40,31 +48,34 @@
   --radius-lg: 10px;
 
   /* Tracking helpers used inline. */
-  --tracking-ui: -0.01em;
-  --tracking-display: -0.02em;
+  --tracking-ui: -0.006em;
+  --tracking-display: -0.022em;
 }
 
 /* ---------- DARK MODE ----------
-   Warm darks — not a generic flip. */
+   "Two papers, one ink." Charcoal paper, dots knock out toward cream. */
 
 .dark {
-  --color-bg: oklch(15% 0.008 60);
-  --color-surface: oklch(18% 0.01 60);
-  --color-surface-2: oklch(21% 0.011 60);
-  --color-border: oklch(28% 0.01 60);
-  --color-border-strong: oklch(38% 0.012 60);
-  --color-text: oklch(94% 0.008 80);
-  --color-text-muted: oklch(64% 0.012 80);
+  --color-bg: oklch(18% 0.014 70);            /* warm tea-ink */
+  --color-surface: oklch(22% 0.015 70);
+  --color-surface-2: oklch(25% 0.016 70);
+  --color-border: oklch(30% 0.016 70);
+  --color-border-strong: oklch(42% 0.018 70);
+  --color-text: oklch(93% 0.012 85);          /* paper */
+  --color-text-muted: oklch(65% 0.015 75);
 
-  --color-accent: oklch(68% 0.16 30);
-  --color-accent-fg: oklch(15% 0.008 60);
+  --color-accent: oklch(70% 0.115 50);
+  --color-accent-fg: oklch(18% 0.014 70);
 
-  --color-success: oklch(70% 0.14 145);
-  --color-danger: oklch(68% 0.18 25);
-  --color-warning: oklch(78% 0.14 75);
+  --color-accent-2: oklch(70% 0.09 245);
+
+  --color-success: oklch(70% 0.12 145);
+  --color-danger: oklch(68% 0.16 28);
+  --color-warning: oklch(76% 0.13 75);
 
   --color-dot-ink: var(--color-text);
   --color-dot-accent: var(--color-accent);
+  --color-dot-second: var(--color-accent-2);
 }
 
 /* ---------- BASE ---------- */
@@ -81,41 +92,55 @@
     -webkit-text-size-adjust: 100%;
   }
 
-  html.light {
-    color-scheme: light;
-  }
-
-  html.dark {
-    color-scheme: dark;
-  }
+  html.light { color-scheme: light; }
+  html.dark { color-scheme: dark; }
 
   body {
     background: var(--color-bg);
     color: var(--color-text);
     font-family: var(--font-sans);
-    font-size: 0.875rem; /* text-sm baseline — Vercel/Notion density */
-    line-height: 1.6;
+    font-size: 0.875rem;
+    line-height: 1.55;
     letter-spacing: var(--tracking-ui);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
   }
 
-  /* Headings get tighter tracking from xl up. */
   h1, h2, h3, h4 {
     letter-spacing: var(--tracking-display);
   }
 
+  /* Spike 1: selection becomes Federal Blue at ~30% alpha. */
   ::selection {
-    background: color-mix(in oklch, var(--color-accent) 30%, transparent);
+    background: color-mix(in oklch, var(--color-accent-2) 30%, transparent);
     color: var(--color-text);
   }
 
-  /* Focus ring shared across primitives. */
+  /* Spike 1: stippled focus ring.
+     Browser-rendered dotted outlines read as halftone halos when sized right
+     and inked in Federal Blue. (Spike 2/3 may upgrade this to true
+     Poisson-disc SVG haloes per element; for the spike, the category change
+     — dots not lines — is what we're testing.) */
   :where(button, a, input, textarea, select, [role="button"], [tabindex]):focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-    border-radius: 2px;
+    outline: 3px dotted var(--color-accent-2);
+    outline-offset: 3px;
+  }
+
+  /* Spike 1: dotted underline that resolves to solid on hover.
+     Opt-in via the `.link` class — prose/textual links only. Nav, card-
+     wrappers, and icon-buttons stay bare so the dots stay meaningful. */
+  .link {
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in oklch, var(--color-accent-2) 60%, transparent);
+    text-decoration-thickness: 1.5px;
+    transition: text-decoration-color 150ms, text-decoration-style 0s;
+  }
+  .link:hover {
+    text-decoration-style: solid;
+    text-decoration-color: var(--color-accent-2);
+    color: var(--color-accent-2);
   }
 }
 
@@ -141,4 +166,14 @@ html:not(.light):not(.dark) body {
   padding: 16px 20px;
   background: transparent !important;
   font-family: var(--font-mono);
+}
+
+/* ---------- DISPLAY HELPER ----------
+   Fraunces with the SOFT axis at 30 — the only Google Font that ships an
+   ink-spread slider. This is the typographic argument for the dot system. */
+.font-display,
+.display {
+  font-family: var(--font-display);
+  font-variation-settings: "SOFT" 30, "opsz" 96, "WONK" 0;
+  font-weight: 600;
 }

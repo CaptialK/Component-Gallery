@@ -20,10 +20,7 @@ export function SiteFooter() {
           <span aria-hidden>·</span>
           <span>{year}</span>
           <span aria-hidden>·</span>
-          <Link
-            href="https://github.com/CapitalK"
-            className="hover:text-[var(--color-text)]"
-          >
+          <Link href="https://github.com/CapitalK" className="link">
             github
           </Link>
         </div>
