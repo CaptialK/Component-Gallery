@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { REGISTRY, findEntry } from "@/lib/registry";
+import { REGISTRY, findEntry, getPlateNumber } from "@/lib/registry";
 import { loadSource } from "@/lib/source-loader";
 import { SourceViewer } from "@/components/_kit/source-viewer";
 import { ComponentPageShell } from "./shell";
+import { SpecimenShell } from "./specimen-shell";
 
 type Params = { category: string; slug: string };
 
@@ -51,16 +52,26 @@ export default async function ComponentPage({
   if (!entry) notFound();
 
   const Loaded = (await entry.load()).default;
-  const source = await loadSource(entry);
+  const entryShape = {
+    category: entry.category,
+    slug: entry.slug,
+    title: entry.title,
+    filename: entry.filename,
+  };
 
+  if (entry.layout === "specimen") {
+    const plateNumber = getPlateNumber(entry.category, entry.slug);
+    return (
+      <SpecimenShell entry={entryShape} plateNumber={plateNumber}>
+        <Loaded />
+      </SpecimenShell>
+    );
+  }
+
+  const source = await loadSource(entry);
   return (
     <ComponentPageShell
-      entry={{
-        category: entry.category,
-        slug: entry.slug,
-        title: entry.title,
-        filename: entry.filename,
-      }}
+      entry={entryShape}
       source={<SourceViewer code={source} />}
     >
       <Loaded />

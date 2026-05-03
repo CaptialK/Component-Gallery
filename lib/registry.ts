@@ -7,6 +7,13 @@ export type ComponentEntry = {
   filename: string;
   description?: string;
   status?: "wip";
+  /**
+   * Page treatment. `default` (or omitted) gets the standard registry-style
+   * shell (header bar, Preview/Source toggle). `specimen` gets the Spike 2
+   * Specimen Cabinet treatment — registration crosshairs, plate number,
+   * foot-of-page colophon, marginalia code reveal.
+   */
+  layout?: "specimen" | "default";
   load: () => Promise<{ default: ComponentType }>;
 };
 
@@ -37,6 +44,7 @@ export const REGISTRY: ComponentEntry[] = [
     filename: "centered-signin.tsx",
     description:
       "A centered card with email, password, and continue-with-GitHub.",
+    layout: "specimen",
     load: () => import("@/components/showcase/auth/centered-signin"),
   },
   {
@@ -67,6 +75,33 @@ export function groupByCategory(): CategoryGroup[] {
 
 export function findEntry(category: string, slug: string) {
   return REGISTRY.find((e) => e.category === category && e.slug === slug);
+}
+
+/**
+ * The plate number for cataloguing — registry position, 1-indexed,
+ * zero-padded to three digits ("№ 002"). Used by the Specimen shell.
+ */
+export function getPlateNumber(category: string, slug: string): string {
+  const idx = REGISTRY.findIndex(
+    (e) => e.category === category && e.slug === slug,
+  );
+  if (idx === -1) return "???";
+  return String(idx + 1).padStart(3, "0");
+}
+
+/**
+ * Display labels for category slugs — cataloguing prose, not registry keys.
+ * Specimen running head reads "Plate № 002. — Authentication. …" rather
+ * than the kebab-cased slug.
+ */
+const CATEGORY_LABELS: Record<string, string> = {
+  auth: "Authentication",
+  layouts: "Layouts",
+  "empty-states": "Empty states",
+};
+
+export function getCategoryLabel(slug: string): string {
+  return CATEGORY_LABELS[slug] ?? slug.replace(/-/g, " ");
 }
 
 export function totals() {
