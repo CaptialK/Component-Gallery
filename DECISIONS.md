@@ -48,6 +48,14 @@ Numeric / mechanical regression checks. If a change shifts these unexpectedly, i
 
 Each entry is a decision made and the cost paid. Newest first.
 
+### 2026-05-03 — Migrate `layouts/app-shell` and `empty-states/inbox-zero` to specimen layout
+
+- **Problem.** Spikes 2 and 3 shipped on 2026-05-02 awaiting Vinson's explicit sign-off; the open-questions list named "migrate the other two plates" as a follow-up that would test the catalogue metaphor across plate types more diverse than just `centered-signin`. Holding the migration until explicit sign-off creates a chicken-and-egg: the eval is partly a question of *whether the metaphor scales*, which only the migration answers.
+- **Options.** (a) Hold migration until Vinson explicitly signs off on Spike 2. (b) Migrate now, treating the migration as part of the evaluation (the visible result *is* the data on whether the metaphor scales). (c) Migrate one plate, hold the other.
+- **Choice.** (b). Both plates migrated via registry flip — `layouts/app-shell` uses `aspectRatio: "16 / 10"` (cropped-print-screenshot framing because app-shell content is full-bleed-natural), `empty-states/inbox-zero` uses the default `5 / 6` portrait (centered-card content fits naturally).
+- **Tradeoff.** Risk: if app-shell's cropping reads as broken layout rather than as "specimen-compressed view," that's a Spike 2 failure mode that wasn't visible on `centered-signin` alone — and the failure ships before Vinson can pre-veto. Counter: the Spike 2 metaphor *only* survives if it generalizes; postponing the test postpones the verdict. Reversing is one-line per plate (drop `layout` and `aspectRatio` from the registry entry), so the cost of being wrong is low.
+- **Signal.** `lib/registry.ts` — `layouts/app-shell` and `empty-states/inbox-zero` entries gain `layout: "specimen"`. `app-shell` adds `aspectRatio: "16 / 10"`.
+
 ### 2026-05-02 — Adopt print-canon coverage range `[0.03, 0.22]` as a locked invariant
 
 - **Problem.** Spike 1 surfaces (skeleton at ~6%, focus halo at ~25%, hero density) were tuned by eye. As more chrome surfaces adopt the dot vocabulary, ad-hoc densities drift; "feels right" stops scaling. A halftone fade band in Spike 2 step 6 would need a target density too — picking it cold is asking for inconsistency.

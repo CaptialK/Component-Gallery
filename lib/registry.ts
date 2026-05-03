@@ -42,6 +42,8 @@ export const REGISTRY: ComponentEntry[] = [
     filename: "app-shell.tsx",
     description:
       "Sidebar + topbar + content area. The chrome itself is the showcase.",
+    layout: "specimen",
+    aspectRatio: "16 / 10",
     load: () => import("@/components/showcase/layouts/app-shell"),
   },
   {
@@ -61,6 +63,7 @@ export const REGISTRY: ComponentEntry[] = [
     filename: "inbox-zero.tsx",
     description:
       "Pointillism illustration, paired with a clear primary action.",
+    layout: "specimen",
     load: () => import("@/components/showcase/empty-states/inbox-zero"),
   },
   {
