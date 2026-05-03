@@ -1,7 +1,12 @@
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
+import { DotField } from "@/components/_kit/dot-field";
 import { RegistrationCrosshair } from "@/components/_kit/registration-crosshair";
 import { getCategoryLabel } from "@/lib/registry";
+import { cn } from "@/lib/cn";
 
 /**
  * SpecimenShell — Spike 2 page treatment. The plate is implicit: defined by
@@ -9,11 +14,16 @@ import { getCategoryLabel } from "@/lib/registry";
  * floats centered inside, painting its own surface.
  *
  * Step 1 shipped the plate frame + crosshairs.
- * Step 2 adds the typographic register: a Fraunces small-italic running head
- * across the top, and a large Fraunces № plate-number watermark in the left
- * margin (desktop only — there is no margin to put it in below `lg`).
- *
- * Server-renderable for now (no client state).
+ * Step 2 added the running head + plate-number watermark.
+ * Step 3 added the foot-of-page colophon below the plate.
+ * Step 4 makes this a client component to own the source-panel toggle. The
+ *   colophon trigger (`· read the plate ·`) opens a panel that lives in the
+ *   right margin on xl+ (catalogue marginalia) and as a bottom drawer with
+ *   backdrop below xl (where the marginalia layout doesn't fit).
+ * Step 6 adds halftone fade bands above and below the plate — Bridson dots
+ *   with linear opacity ramp, peaking at the plate edge and fading away into
+ *   the surrounding paper. The transitions read as ink-fade-in / ink-fade-out
+ *   rather than as section dividers.
  */
 
 type EntryShape = {
@@ -26,18 +36,31 @@ type EntryShape = {
 export function SpecimenShell({
   entry,
   plateNumber,
+  source,
   children,
 }: {
   entry: EntryShape;
   plateNumber: string;
+  source: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const [sourceOpen, setSourceOpen] = React.useState(false);
   const categoryLabel = getCategoryLabel(entry.category);
+  const panelId = React.useId();
+
+  // ESC closes the panel.
+  React.useEffect(() => {
+    if (!sourceOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSourceOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sourceOpen]);
 
   return (
     <div className="relative min-h-dvh bg-[var(--color-bg)]">
-      {/* Index back-link — quiet mono, top-left. Kept across all breakpoints
-          so navigation works even when the running head hides on mobile. */}
+      {/* Index back-link — quiet mono, top-left. Kept across all breakpoints. */}
       <Link
         href="/"
         aria-label="Back to index"
@@ -47,9 +70,7 @@ export function SpecimenShell({
         <span className="font-mono">index</span>
       </Link>
 
-      {/* Running head — Fraunces small italic, top-center. Hidden on narrow
-          screens because there's no room for the catalogue prose without
-          breaking the line; the back-link still anchors the page. */}
+      {/* Running head — Fraunces small italic, top-center. md+ only. */}
       <div
         className="pointer-events-none absolute left-1/2 top-9 z-0 hidden -translate-x-1/2 whitespace-nowrap font-display text-[15px] italic text-[var(--color-text-muted)] md:block"
         style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
@@ -68,16 +89,17 @@ export function SpecimenShell({
         {"."}
       </div>
 
-      {/* Plate area. */}
-      <div className="grid min-h-dvh place-items-center px-8 py-24">
+      {/* Plate + fade bands + colophon column. */}
+      <div className="flex min-h-dvh flex-col items-center px-8 py-24">
+        {/* Top halftone fade — paper transitioning into the plate. */}
+        <FadeBand height={80} direction="into" />
+
         <div
           data-plate={entry.slug}
           className="relative w-full max-w-[600px]"
           style={{ aspectRatio: "5 / 6" }}
         >
-          {/* Plate-number watermark in the left margin — printer's mark.
-              Roman, large, low-opacity Fraunces. Hidden below `lg` (no margin
-              to occupy). Centered vertically against the plate. */}
+          {/* Left-margin № watermark — lg+ only. */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute right-full top-1/2 hidden -translate-y-1/2 select-none pr-16 lg:block"
@@ -93,7 +115,6 @@ export function SpecimenShell({
             </div>
           </div>
 
-          {/* Crosshairs — four corners; top-right gets the misregistration ghost. */}
           <RegistrationCrosshair size={40} className="absolute -left-5 -top-5" />
           <RegistrationCrosshair
             size={40}
@@ -103,10 +124,143 @@ export function SpecimenShell({
           <RegistrationCrosshair size={40} className="absolute -left-5 -bottom-5" />
           <RegistrationCrosshair size={40} className="absolute -right-5 -bottom-5" />
 
-          {/* The plate surface — the component fills it. No border. */}
           <div className="absolute inset-0 overflow-hidden">{children}</div>
         </div>
+
+        {/* Bottom halftone fade — plate transitioning back to paper. */}
+        <FadeBand height={80} direction="out" />
+
+        {/* Colophon sits below the bottom fade with explicit breath. */}
+        <div className="mt-12 w-full max-w-[600px]">
+          <Colophon
+            sourceOpen={sourceOpen}
+            panelId={panelId}
+            onToggle={() => setSourceOpen((o) => !o)}
+          />
+        </div>
       </div>
+
+      {/* Backdrop — only when open AND below xl (drawer mode). */}
+      <div
+        aria-hidden="true"
+        onClick={() => setSourceOpen(false)}
+        className={cn(
+          "fixed inset-0 z-40 bg-[var(--color-text)]/30 transition-opacity duration-200 xl:hidden",
+          sourceOpen ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+      />
+
+      {/* Source panel — desktop marginalia + mobile drawer in one element. */}
+      <aside
+        id={panelId}
+        role="region"
+        aria-label={`Source for plate № ${plateNumber}`}
+        inert={!sourceOpen}
+        className={cn(
+          "fixed z-50 flex flex-col bg-[var(--color-surface)] shadow-[0_-8px_24px_rgba(0,0,0,0.08)] transition-transform duration-300 ease-out",
+          // Mobile/tablet: bottom drawer.
+          "inset-x-0 bottom-0 h-[85dvh] rounded-t-[var(--radius-md)]",
+          // xl+: right-side marginalia, full height, no rounded corners.
+          "xl:inset-auto xl:right-0 xl:top-0 xl:h-full xl:w-[440px] xl:rounded-none xl:border-l xl:border-[var(--color-border)] xl:shadow-[-8px_0_24px_rgba(0,0,0,0.06)]",
+          // Transform state.
+          sourceOpen
+            ? "translate-y-0 xl:translate-x-0"
+            : "translate-y-full xl:translate-y-0 xl:translate-x-full",
+        )}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            Plate № {plateNumber} · {entry.filename}
+          </div>
+          <button
+            type="button"
+            onClick={() => setSourceOpen(false)}
+            aria-label="Close source"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-xs)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
+          >
+            <X size={13} strokeWidth={1.6} />
+          </button>
+        </div>
+        <div className="flex-1 overflow-hidden">{source}</div>
+      </aside>
+    </div>
+  );
+}
+
+/**
+ * FadeBand — Bridson-distributed dot strip whose density ramps along the
+ * vertical axis. "Into" peaks at the bottom (plate-side); "out" peaks at the
+ * top (plate-side). Peak density 0.7 follows the dots_reserach.md spec.
+ *
+ * Coverage at the densest end works out to ~10% area, well inside the
+ * locked print-canon range [0.03, 0.22]. Single-tone (`accentRatio: 0`)
+ * because the fade is rhythm, not accent.
+ */
+function FadeBand({
+  height = 80,
+  direction,
+}: {
+  height?: number;
+  direction: "into" | "out";
+}) {
+  const peakDensity = 0.7;
+  const density =
+    direction === "into"
+      ? (_x: number, y: number, _w: number, h: number) => peakDensity * (y / h)
+      : (_x: number, y: number, _w: number, h: number) =>
+          peakDensity * (1 - y / h);
+
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none w-full max-w-[600px]"
+      style={{ height: `${height}px` }}
+    >
+      <DotField
+        shape={{ kind: "rect", width: 600, height }}
+        spacing={5}
+        dotRadius={1.1}
+        baseDensity={1}
+        density={density}
+        accentRatio={0}
+        seed={direction === "into" ? 7 : 17}
+        className="h-full w-full"
+      />
+    </div>
+  );
+}
+
+/**
+ * Foot-of-page colophon — typeset book caption beneath the plate. The
+ * `· read the plate ·` button is the source-reveal trigger; styled inline
+ * to read as part of the colophon prose, not as a separate UI element.
+ */
+function Colophon({
+  sourceOpen,
+  panelId,
+  onToggle,
+}: {
+  sourceOpen: boolean;
+  panelId: string;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      className="w-full max-w-[600px] text-center font-display text-[12px] italic leading-[1.7] text-[var(--color-text-muted)] [text-wrap:balance]"
+      style={{ fontVariationSettings: '"opsz" 18, "SOFT" 30' }}
+    >
+      Set in Fraunces 96/96 SOFT 30, Geist Sans 14/21, Geist Mono 13/19.
+      Composed in TypeScript 6. Pressed onto Tailwind v4. First impression May 2026.{" "}
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={sourceOpen}
+        aria-controls={panelId}
+        className="link cursor-pointer border-0 bg-transparent p-0 font-display text-[12px] italic text-[var(--color-text)]"
+        style={{ fontVariationSettings: '"opsz" 18, "SOFT" 30' }}
+      >
+        · read the plate ·
+      </button>
     </div>
   );
 }

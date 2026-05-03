@@ -73,7 +73,17 @@
   --color-danger: oklch(68% 0.16 28);
   --color-warning: oklch(76% 0.13 75);
 
-  --color-dot-ink: var(--color-text);
+  /* Spike 2 step 5 — "two papers, one ink." Dark mode dots knock out to the
+     light-theme cream paper color rather than rendering as bright dots on
+     dark. This is the negative-space behavior Risograph prints exhibit on
+     dark stock: the ink doesn't fill, and the paper shows through.
+     Hardcoded literal (not theme-referenced) — that's the whole point. */
+  --color-dot-ink: oklch(96.5% 0.012 85);
+
+  /* Persimmon and Federal Blue stay as inks in dark mode. Most dots are
+     ink-color (82% by default), so the knock-out dominates; the small
+     fraction of persimmon accent dots reads as the second pass of a real
+     Riso. Federal Blue remains the state ink (selection, focus, crosshairs). */
   --color-dot-accent: var(--color-accent);
   --color-dot-second: var(--color-accent-2);
 }

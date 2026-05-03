@@ -59,16 +59,21 @@ export default async function ComponentPage({
     filename: entry.filename,
   };
 
+  const source = await loadSource(entry);
+
   if (entry.layout === "specimen") {
     const plateNumber = getPlateNumber(entry.category, entry.slug);
     return (
-      <SpecimenShell entry={entryShape} plateNumber={plateNumber}>
+      <SpecimenShell
+        entry={entryShape}
+        plateNumber={plateNumber}
+        source={<SourceViewer code={source} />}
+      >
         <Loaded />
       </SpecimenShell>
     );
   }
 
-  const source = await loadSource(entry);
   return (
     <ComponentPageShell
       entry={entryShape}
