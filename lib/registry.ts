@@ -173,6 +173,62 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     load: () => import("@/components/showcase/empty-states/no-encounters-yet"),
   },
+  {
+    category: "clinical",
+    slug: "appointment-week",
+    title: "Appointment week",
+    filename: "appointment-week.tsx",
+    description:
+      "Outpatient week view. Free-time cells stippled at canon floor; each appointment header carries a duration-as-density indicator. Federal Blue hairline crosses today's column at the present minute.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    load: () => import("@/components/showcase/clinical/appointment-week"),
+  },
+  {
+    category: "clinical",
+    slug: "order-entry",
+    title: "Order entry",
+    filename: "order-entry.tsx",
+    description:
+      "CPOE search-as-you-type. Each suggestion carries a frequency-in-your-panel stipple; cost-rank as four small dots. Cart rail on the right queues the order.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    load: () => import("@/components/showcase/clinical/order-entry"),
+  },
+  {
+    category: "clinical",
+    slug: "encounter-timeline",
+    title: "Encounter timeline",
+    filename: "encounter-timeline.tsx",
+    description:
+      "Vertical event log for a hospital admission. The thread between events is a Bridson stipple whose density encodes time-since-last-event; flagged events ink in persimmon, the live event wears a Federal Blue ring.",
+    layout: "specimen",
+    load: () => import("@/components/showcase/clinical/encounter-timeline"),
+  },
+  {
+    category: "layouts",
+    slug: "bed-board",
+    title: "Bed board",
+    filename: "bed-board.tsx",
+    description:
+      "Med-Surg bed board. Each occupied cell carries a stipple whose density encodes length-of-stay; isolation precautions render as a perimeter dot rule (interior stays flat). Empty cells distinguish clean / dirty / blocked by shape, not colour.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    load: () => import("@/components/showcase/layouts/bed-board"),
+  },
+  {
+    category: "clinical",
+    slug: "discharge-summary",
+    title: "Discharge summary",
+    filename: "discharge-summary.tsx",
+    description:
+      "Printable after-visit document. Section breaks render as halftone fade bands; the signature line ends with a Federal Blue ink trail; footer carries a stippled official seal.",
+    layout: "specimen",
+    load: () => import("@/components/showcase/clinical/discharge-summary"),
+  },
 ];
 
 export type CategoryGroup = {
