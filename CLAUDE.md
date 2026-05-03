@@ -86,8 +86,9 @@ lib/
   registry.ts                 single source of truth for entries
   source-loader.ts            server-only file reader for the source viewer
   cn.ts                       clsx + tailwind-merge helper
-public/previews/              generated screenshots (Phase 2)
-scripts/snap.ts               Playwright stub
+public/previews/              generated plate screenshots (light + dark per plate)
+scripts/snap.ts               Playwright snap pipeline — `pnpm snap`
+app/preview/[category]/[slug] bare-component preview route consumed by snap
 ```
 
 ## Adding a new component (the only sanctioned path)
@@ -127,7 +128,7 @@ pnpm install
 pnpm dev          # http://localhost:3000
 pnpm typecheck    # tsc --noEmit
 pnpm build        # production build (also typechecks)
-pnpm snap         # placeholder; Playwright pipeline lands in Phase 2
+pnpm snap         # capture light+dark previews to public/previews/ (needs `pnpm dev` running)
 ```
 
 When making non-trivial changes, run `pnpm typecheck` and `pnpm build` before
