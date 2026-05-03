@@ -32,9 +32,29 @@ The non-negotiable spirit-level rules. Changing one is a whole-project decision,
 
 ---
 
+## Locked invariants
+
+Numeric / mechanical regression checks. If a change shifts these unexpectedly, investigate before shipping.
+
+- **Print-canon coverage range: `[0.03, 0.22]`.** Every dot field in the system — hero, skeleton, focus halo, divider, halftone fade — designs against this range. Below 3% the field disappears into noise; above 22% adjacent dots merge into a flat tint and the dotted texture is lost (Sheridan halftone guidelines). The current Spike 1 surfaces sit inside this range; new chrome work must, too.
+- **Bridson Poisson-disc is the canonical sampler.** `DotField`'s `distribution="grid"` exists only for back-compat; new callers leave it on the default.
+- **`r`, `cx`, `cy` on `<circle>` are never animated.** Only `transform` and `opacity` for compositor-cheap motion.
+- **Container queries, not viewport queries**, for any layout where the plate sits inside a larger surface (e.g. step-4 marginalia → drawer breakpoint).
+- **No pure `#000` or `#fff`.** OKLCH-only palette; pure values cause OLED smear and read flat. Already enforced by the `@theme` block.
+
+---
+
 ## Decisions ledger
 
 Each entry is a decision made and the cost paid. Newest first.
+
+### 2026-05-02 — Adopt print-canon coverage range `[0.03, 0.22]` as a locked invariant
+
+- **Problem.** Spike 1 surfaces (skeleton at ~6%, focus halo at ~25%, hero density) were tuned by eye. As more chrome surfaces adopt the dot vocabulary, ad-hoc densities drift; "feels right" stops scaling. A halftone fade band in Spike 2 step 6 would need a target density too — picking it cold is asking for inconsistency.
+- **Options.** (a) Continue tuning each surface by eye. (b) Adopt a single bound (e.g. cap at 25%, no floor). (c) Adopt the print-canon range `[0.03, 0.22]` from `resources/moving_points.md` (and Sheridan halftone guidelines): always ≥3% so the field reads, never >22% before dots merge into a flat tint.
+- **Choice.** (c). Locked invariant going forward; existing surfaces audited against it as Spike 2 progresses.
+- **Tradeoff.** Mostly upside — design discipline tightens. Downside: the focus halo as currently spec'd in the design research (~25% on the annulus) is slightly above ceiling; if the haloes start reading as flat rather than dotted on retina, that's the failure mode the ceiling predicts. Worth checking on a high-DPR display before declaring it fine.
+- **Signal.** `DECISIONS.md` "Locked invariants" section (added same day); `resources/moving_points.md` is the source.
 
 ### 2026-05-02 — Spike 2 test plate is `auth/centered-signin`
 
