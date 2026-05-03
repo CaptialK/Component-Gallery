@@ -85,6 +85,94 @@ export const REGISTRY: ComponentEntry[] = [
     aspectRatio: "4 / 3",
     load: () => import("@/components/showcase/dashboards/activity-heatmap"),
   },
+  {
+    category: "layouts",
+    slug: "chart-header",
+    title: "Chart header",
+    filename: "chart-header.tsx",
+    description:
+      "Sticky patient banner: stippled monogram, density-as-severity allergy ribbon, code-status rule. The visual identity of a chart in one strip.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    load: () => import("@/components/showcase/layouts/chart-header"),
+  },
+  {
+    category: "dashboards",
+    slug: "vitals-monitor",
+    title: "Vitals monitor",
+    filename: "vitals-monitor.tsx",
+    description:
+      "Bedside dashboard for HR, BP, SpO₂, RR, Temp. Per-metric dot sparkline with normal envelope as a Bridson density backdrop; live read marked by a Federal Blue ring.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    load: () => import("@/components/showcase/dashboards/vitals-monitor"),
+  },
+  {
+    category: "dashboards",
+    slug: "triage-queue",
+    title: "Triage queue",
+    filename: "triage-queue.tsx",
+    description:
+      "ED arrivals sorted by ESI acuity. Density encodes severity, dot trail encodes wait, persimmon dots tip past the per-ESI threshold.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    load: () => import("@/components/showcase/dashboards/triage-queue"),
+  },
+  {
+    category: "clinical",
+    slug: "medication-list",
+    title: "Medication list",
+    filename: "medication-list.tsx",
+    description:
+      "Active meds with a 24-hour scheduled-dose strip per row. One dot per dose; given · upcoming · overdue · suspended each get a distinct dot vocabulary.",
+    layout: "specimen",
+    load: () => import("@/components/showcase/clinical/medication-list"),
+  },
+  {
+    category: "clinical",
+    slug: "lab-results",
+    title: "Lab results",
+    filename: "lab-results.tsx",
+    description:
+      "CMP + CBC with each value placed on a stippled reference-range ribbon. Federal Blue marker in-range, persimmon out; H/L margin letters carry the analytical readout.",
+    layout: "specimen",
+    load: () => import("@/components/showcase/clinical/lab-results"),
+  },
+  {
+    category: "clinical",
+    slug: "intake-soap-note",
+    title: "SOAP note",
+    filename: "intake-soap-note.tsx",
+    description:
+      "Subjective / Objective / Assessment / Plan, four panes. Each header carries a coverage-as-completeness stipple — density grows with what's drafted.",
+    layout: "specimen",
+    load: () => import("@/components/showcase/clinical/intake-soap-note"),
+  },
+  {
+    category: "layouts",
+    slug: "care-team-rail",
+    title: "Care team rail",
+    filename: "care-team-rail.tsx",
+    description:
+      "Narrow vertical rail of providers on for a patient. Status as a four-glyph dot vocabulary; on-call lead gets a Federal Blue marginal stipple.",
+    layout: "specimen",
+    aspectRatio: "9 / 16",
+    maxWidth: 320,
+    load: () => import("@/components/showcase/layouts/care-team-rail"),
+  },
+  {
+    category: "empty-states",
+    slug: "no-encounters-yet",
+    title: "No encounters yet",
+    filename: "no-encounters-yet.tsx",
+    description:
+      "Empty-state for a patient with no recent visits. EKG trace rendered entirely from dots, fading from sinus rhythm to flat line.",
+    layout: "specimen",
+    load: () => import("@/components/showcase/empty-states/no-encounters-yet"),
+  },
 ];
 
 export type CategoryGroup = {
@@ -128,6 +216,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   layouts: "Layouts",
   "empty-states": "Empty states",
   dashboards: "Dashboards",
+  clinical: "Clinical",
 };
 
 export function getCategoryLabel(slug: string): string {
