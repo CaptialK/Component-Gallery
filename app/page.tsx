@@ -114,11 +114,12 @@ function ComponentCard({ entry }: { entry: ComponentEntry }) {
   return (
     <Link
       href={`/c/${entry.category}/${entry.slug}`}
+      data-focus-ring="off"
       className="group block focus-visible:outline-none"
     >
       <div className="relative">
         {/* Stacked previews — dark peeks from behind on hover */}
-        <div className="relative aspect-[4/3] overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-2)] transition-[transform,border-color] duration-300 group-hover:-translate-y-1 group-hover:border-[var(--color-border-strong)]">
+        <div className="relative aspect-[4/3] overflow-hidden rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-2)] transition-[transform,border-color] duration-300 group-hover:-translate-y-1 group-hover:border-[var(--color-border-strong)] group-focus-visible:-translate-y-1 group-focus-visible:border-[var(--color-accent-2)]">
           <PreviewPlaceholder seed={hashSeed(entry.category + entry.slug)} />
         </div>
         <div

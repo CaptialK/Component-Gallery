@@ -117,13 +117,45 @@
     color: var(--color-text);
   }
 
-  /* Spike 1: stippled focus ring.
-     Browser-rendered dotted outlines read as halftone halos when sized right
-     and inked in Federal Blue. (Spike 2/3 may upgrade this to true
-     Poisson-disc SVG haloes per element; for the spike, the category change
-     — dots not lines — is what we're testing.) */
-  :where(button, a, input, textarea, select, [role="button"], [tabindex]):focus-visible {
-    outline: 3px dotted var(--color-accent-2);
+  /* Spike 1 v2: stippled focus halo, painted via a ::after pseudo-element.
+     Browser-default `outline-style: dotted` rendered as pixel-aligned squares
+     and didn't read as halftone — this version uses a radial-gradient dot
+     pattern masked to an annulus, which is consistent across browsers and
+     reads as a real halo of dots.
+
+     Replaced elements (input/select/textarea) can't host pseudo-elements
+     reliably, so they fall back to a tighter outline-style. Card wrappers
+     and other elements that don't want a halo opt out with
+     `data-focus-ring="off"`. */
+
+  :where(button, a, [role="button"], [tabindex]):not([data-focus-ring="off"]):focus-visible {
+    outline: none;
+    position: relative;
+  }
+  :where(button, a, [role="button"], [tabindex]):not([data-focus-ring="off"]):focus-visible::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    pointer-events: none;
+    border-radius: inherit;
+    padding: 3px;
+    background-image: radial-gradient(
+      circle at center,
+      var(--color-accent-2) 0.95px,
+      transparent 1.4px
+    );
+    background-size: 5px 5px;
+    background-position: 0 0;
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+
+  /* Replaced elements — pseudo-elements aren't supported, fall back. */
+  :where(input, select, textarea):not([data-focus-ring="off"]):focus-visible {
+    outline: 2px dotted var(--color-accent-2);
     outline-offset: 3px;
   }
 
