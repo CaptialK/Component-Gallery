@@ -27,9 +27,22 @@ If components come out looking like default shadcn, you've failed.
 
 **Interior surfaces of controls stay flat** — no halftone fills inside button
 bodies, no dot patterns inside table cells, no stippled input strokes.
-*Perimeter, state, and rhythm of controls carry the language.* Use
-`components/_kit/dot-field.tsx` (Bridson Poisson-disc by default) for any dot
-work.
+**Backgrounds beneath text or data values also stay flat** — dots-as-
+background was attempted in the medical-SaaS batch and failed (see
+`DECISIONS.md` 2026-05-03 retrospective).
+*Perimeter, state, and rhythm of controls carry the language.*
+
+The system has two atomic primitives:
+
+- **Dots** (`components/_kit/dot-field.tsx`, Bridson Poisson-disc by default)
+  — discrete marks. Events, states, register marks, illustration, single
+  values. Punctuation.
+- **Lines** (`components/_kit/trace.tsx`) — continuous trends. Sparklines,
+  thresholds, reference ranges, connections, divider rules. Connection.
+
+*Dots punctuate; lines connect; backgrounds stay flat.* For quantitative
+data, prefer position on a common scale or line/length — Cleveland-McGill
+ranks both above texture/density.
 
 ## Forbidden patterns
 

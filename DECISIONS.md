@@ -48,6 +48,20 @@ Numeric / mechanical regression checks. If a change shifts these unexpectedly, i
 
 Each entry is a decision made and the cost paid. Newest first.
 
+### 2026-05-03 — Retrospective: dots-as-background failed; adding lines to the system
+
+A wandering experiment. Logged here so the boundary the system found is preserved, not papered over.
+
+- **What was attempted.** PR #2 (commits `aa8ccc9`, `2907fa6`, `4e9a36e`) shipped 13 medical-SaaS plates and pushed the dot vocabulary to its perceptual limit: dots-as-background behind patient info on chart-header, Bridson density envelopes behind vitals sparklines, stippled reference-range ribbons under lab values, per-cell LOS density on a bed grid. The premise was *one Bridson primitive powers everything* — and on paper, that includes "ambient density behind data."
+- **Why it failed.** Vinson reviewed plates №5, 6, 9, 16 and reported the same problem in each: text and data values placed *over* dot fields read poorly. Cleveland & McGill (1984) ranking confirms: position-on-common-scale (rank 1) and length/line (rank 3) sit far above texture/density (rank 7) for quantitative reading. The dots-everywhere approach also ignored a layout principle the chrome-narrowing rule didn't quite cover — *backgrounds beneath text/data should stay flat*, the same way control interiors stay flat. The rule had a gap, the system permitted the misuse.
+- **Choice.** Extend the system rather than tighten the existing one. Add a complementary primitive — **lines** — and decompose the data vocabulary into:
+  - **Dots** — discrete, categorical, present-moment things. Events, states, register marks, illustration components, single data points. *Punctuation.*
+  - **Lines** — continuous, ordered, quantitative things. Sparkline trends, threshold rules, reference ranges, connections between events. *Connection.*
+  - Backgrounds beneath text or data values stay flat. The chrome-narrowing rule extends accordingly.
+- **Tradeoff.** The "one Bridson primitive powers everything" thesis weakens further (already softened with the Spike 3 area pivot). The system now has two atomic units, not one. Worth it: a system that can't render quantitative data legibly isn't a system, it's an aesthetic. Keeping the misuse-allowing rule would have meant adding more plates that fail the same way — the wandering revealed the shape; the shape is *dots-and-lines*, not *dots-only*.
+- **What's preserved.** The misused versions of plates 5, 6, 9, 16 stay in commit history (`aa8ccc9`, `2907fa6`, `4e9a36e`) as a record of where the system broke. They're worth keeping in the project's story — *the experiment wandering is itself the work*. Future writeups about this gallery should cite the failed approach alongside the working one; finding the boundary is more interesting than always operating safely inside it.
+- **Signal.** New `Trace` primitive in `components/_kit/trace.tsx`. CLAUDE.md "interior surfaces flat" rule extended to "backgrounds beneath text/data also flat." Plates 5, 6, 9, 16 refactored in subsequent commits referencing this entry.
+
 ### 2026-05-03 — Pivot Spike 3 encoding from density to area (single dot, sized by value)
 
 - **Problem.** Spike 3 v1 shipped 2026-05-02 with a density encoding — each cell rendered as a Bridson dot cluster whose count mapped to value. Vinson read it on dark + light, on wide + narrow, and reported the density differences read at a slight squint; small viewport scales made low-coverage cells visually indistinguishable from medium-coverage cells. The encoding's perceptual ranking is the cause: Cleveland & McGill's 1984 study (and Munzner 2014) put **area above texture** for quantitative reading by ~1.5 ranks. Density / texture is the channel I picked precisely because of the design research's "density-as-data" framing — but the framing was overspec'd against perception.
