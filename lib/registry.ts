@@ -72,7 +72,7 @@ export const REGISTRY: ComponentEntry[] = [
     title: "Activity heatmap",
     filename: "activity-heatmap.tsx",
     description:
-      "Density-as-data: each cell is a Bridson dot cluster whose count maps to the day's value via the print-canon coverage formula.",
+      "Area-as-data: one dot per cell, sized by the day's value. Sqrt-scaled radius keeps equal value deltas perceptually uniform.",
     layout: "specimen",
     aspectRatio: "4 / 3",
     load: () => import("@/components/showcase/dashboards/activity-heatmap"),

@@ -1,27 +1,30 @@
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
+import { mulberry32 } from "@/components/_kit/dot-noise";
 
 /**
- * Activity heatmap — Spike 3, density-as-data.
+ * Activity heatmap — Spike 3, area-as-data.
  *
- * 53 weeks × 7 days. Each cell renders as a Bridson dot cluster whose count
- * is derived from the cell value via the locked print-canon formula:
+ * 53 weeks × 7 days. Each cell renders as a *single* dot whose radius
+ * encodes the cell value. Cleveland-McGill perceptual ranking puts area
+ * above density/texture for quantitative reading, so size encoding reads
+ * more legibly than the density-cluster encoding the spike originally
+ * proposed.
  *
- *   coverage = clamp(0.03 + 0.19 × normalize(value), 0, 0.22)
- *   N        = round(coverage × cellArea / dotArea)
+ * Coverage stays bounded to the locked print-canon range from DECISIONS.md
+ * on a *per-cell* basis: the smallest dot covers ~3% of its cell (always
+ * visible), the largest ~22% (never flat fill). Radii are picked from
  *
- * One canonical Bridson tile is generated at module load and sliced per-cell;
- * identical-value cells get identical dot patterns, which is what makes the
- * field read as a *system* rather than as ornament. Cells respect the locked
- * coverage invariant from `DECISIONS.md` end-to-end — sparse cells stay
- * visible (≥3%), dense cells never tip into flat-fill (≤22%).
+ *   r_min² = baseline × cellArea / π   (~0.97 at cell 10)
+ *   r_max² = maxCov   × cellArea / π   (~2.66 at cell 10)
+ *   r²     = r_min² + (r_max² - r_min²) × normalize(value)
  *
- * Bertin honesty: texture sits near the bottom of his selectivity ranking
- * for quantitative reading, so each cell carries a `<title>` tooltip with
- * the raw number. The dot field is the ambient pattern; the tooltip is the
- * analytical readout.
+ * Sqrt scaling on r² means equal value deltas produce equal area deltas —
+ * what your eye actually compares.
  *
- * Pure server component — no client state, no hover JS. Tooltips come from
- * native browser `<title>` rendering.
+ * Bertin honesty: even with area encoding (rank 5 of 7), each cell carries
+ * a native `<title>` tooltip with the raw number — area is "ambient
+ * pattern," tooltip is "analytical readout."
+ *
+ * Pure server component — no client state, no hover JS.
  */
 
 const WEEKS = 53;
@@ -29,23 +32,13 @@ const DAYS = 7;
 const CELL = 10;
 const GAP = 1;
 const STEP = CELL + GAP;
-const DOT_R = 0.6;
 
 const BASELINE = 0.03;
 const MAX_COVERAGE = 0.22;
-const SLOPE = MAX_COVERAGE - BASELINE;
-const DOT_AREA = Math.PI * DOT_R * DOT_R;
 const CELL_AREA = CELL * CELL;
-const MAX_DOTS_PER_CELL = Math.floor((MAX_COVERAGE * CELL_AREA) / DOT_AREA);
-
-// One canonical tile of Bridson points within a CELL × CELL region. Bridson
-// radius is tuned so we can reliably get ≥ MAX_DOTS_PER_CELL points per tile.
-const TILE = poissonDisc({
-  width: CELL,
-  height: CELL,
-  radius: DOT_R * 2.0,
-  seed: 1,
-});
+const MIN_R_SQ = (BASELINE * CELL_AREA) / Math.PI;
+const MAX_R_SQ = (MAX_COVERAGE * CELL_AREA) / Math.PI;
+const MIN_R = Math.sqrt(MIN_R_SQ);
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_LABELS: Array<{ index: number; label: string }> = [
@@ -74,12 +67,12 @@ function generateActivity(seed: number): Cell[] {
   return cells;
 }
 
-function dotCountFor(value: number, max: number): number {
-  if (max <= 0) return 0;
-  const norm = value / max;
-  const coverage = Math.max(0, Math.min(MAX_COVERAGE, BASELINE + SLOPE * norm));
-  const target = Math.round((coverage * CELL_AREA) / DOT_AREA);
-  return Math.min(target, TILE.length);
+function radiusFor(value: number, max: number): number {
+  if (max <= 0) return MIN_R;
+  const norm = Math.max(0, Math.min(1, value / max));
+  // Linear in area (r²) gives perceptually-uniform size differences;
+  // Cleveland & McGill rank area above texture for quantitative encoding.
+  return Math.sqrt(MIN_R_SQ + (MAX_R_SQ - MIN_R_SQ) * norm);
 }
 
 function dayLabel(day: number): string {
@@ -188,11 +181,10 @@ export default function ActivityHeatmap() {
             ))}
           </g>
 
-          {/* Heatmap cells. */}
+          {/* Heatmap cells. One dot per cell, centered, sized by value. */}
           <g transform={`translate(${dayLabelGutter} ${monthLabelHeight})`}>
             {cells.map((c) => {
-              const n = dotCountFor(c.value, max);
-              const dots = TILE.slice(0, n);
+              const r = radiusFor(c.value, max);
               const tx = c.week * STEP;
               const ty = c.day * STEP;
               return (
@@ -206,22 +198,19 @@ export default function ActivityHeatmap() {
                     {dateLabel(c.week, c.day)}
                   </title>
                   {/* Invisible cell rect carries the tooltip hover area for
-                      cells with very few dots. */}
+                      cells with very small dots. */}
                   <rect
                     width={CELL}
                     height={CELL}
                     fill="transparent"
                     pointerEvents="all"
                   />
-                  {dots.map((p, j) => (
-                    <circle
-                      key={j}
-                      cx={p.x}
-                      cy={p.y}
-                      r={DOT_R}
-                      fill="var(--color-dot-ink)"
-                    />
-                  ))}
+                  <circle
+                    cx={CELL / 2}
+                    cy={CELL / 2}
+                    r={r}
+                    fill="var(--color-dot-ink)"
+                  />
                 </g>
               );
             })}
@@ -247,24 +236,18 @@ export default function ActivityHeatmap() {
               less
             </text>
             {[0, 0.25, 0.5, 0.75, 1].map((norm, i) => {
-              const target = Math.round(
-                ((BASELINE + SLOPE * norm) * CELL_AREA) / DOT_AREA,
-              );
-              const dots = TILE.slice(0, Math.min(target, TILE.length));
+              const r = radiusFor(norm, 1);
               return (
                 <g
                   key={i}
                   transform={`translate(${30 + i * (CELL + 2)} 0)`}
                 >
-                  {dots.map((p, j) => (
-                    <circle
-                      key={j}
-                      cx={p.x}
-                      cy={p.y}
-                      r={DOT_R}
-                      fill="var(--color-dot-ink)"
-                    />
-                  ))}
+                  <circle
+                    cx={CELL / 2}
+                    cy={CELL / 2}
+                    r={r}
+                    fill="var(--color-dot-ink)"
+                  />
                 </g>
               );
             })}
@@ -293,10 +276,11 @@ export default function ActivityHeatmap() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Each cell renders as a Bridson dot cluster whose count maps to the
-          day's value via the print-canon coverage formula. Coverage is bounded
-          to 3–22% — the range inside which a dot field reads as texture
-          rather than as fill. Hover any cell for the raw number.
+          Each cell renders as a single dot whose area maps to the day's
+          value. Per-cell coverage stays bounded to 3–22% — the dot is barely
+          visible at zero, roughly a fifth of the cell at peak. Sqrt scaling
+          on r² makes equal value deltas read as equal area deltas. Hover
+          any cell for the raw number.
         </p>
       </div>
     </div>

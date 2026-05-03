@@ -48,6 +48,17 @@ Numeric / mechanical regression checks. If a change shifts these unexpectedly, i
 
 Each entry is a decision made and the cost paid. Newest first.
 
+### 2026-05-03 — Pivot Spike 3 encoding from density to area (single dot, sized by value)
+
+- **Problem.** Spike 3 v1 shipped 2026-05-02 with a density encoding — each cell rendered as a Bridson dot cluster whose count mapped to value. Vinson read it on dark + light, on wide + narrow, and reported the density differences read at a slight squint; small viewport scales made low-coverage cells visually indistinguishable from medium-coverage cells. The encoding's perceptual ranking is the cause: Cleveland & McGill's 1984 study (and Munzner 2014) put **area above texture** for quantitative reading by ~1.5 ranks. Density / texture is the channel I picked precisely because of the design research's "density-as-data" framing — but the framing was overspec'd against perception.
+- **Options.**
+  - (a) Keep the density encoding; tune dot size and cell size to make density differences more legible (more dots per cell, bigger dots, bigger cells).
+  - (b) Switch to **area encoding**: one dot per cell, radius scales with value. Perceptually higher-rank channel; abandons the "density-as-data" thesis label but probably the right call.
+  - (c) Layer both — single dot grows with value AND extra dots appear at high values. Maximal information channel, but mixes two encoding axes and risks reading as visual noise.
+- **Choice.** (b). Honor the locked `[0.03, 0.22]` coverage invariant on a per-cell basis: smallest dot (value=0) covers ~3% of cell (always visible, never disappears), largest dot (value=max) covers ~22% (never reads as flat fill). Sqrt scaling on r² so equal value deltas produce equal *area* deltas — what the eye actually compares.
+- **Tradeoff.** The "density-as-data" naming for Spike 3 was rhetorically clean; "area-as-data" is wordier and less novel-sounding. But density is rank 7 and area is rank 5 on Cleveland-McGill, and the project's primary obligation is to *be readable*, not to be on-message. The "one Bridson primitive powers everything" claim weakens slightly: hero, focus halo, skeleton, and halftone fades still all run Bridson; the heatmap now doesn't. That's worth flagging in any future writeup, not papering over.
+- **Signal.** `components/showcase/dashboards/activity-heatmap.tsx` — `radiusFor(value, max)` helper replaces `dotCountFor`. Single `<circle>` per cell, no Bridson tile import. Legend updated to show 5 increasing dot sizes. Registry description swapped to "area-as-data."
+
 ### 2026-05-03 — Migrate `layouts/app-shell` and `empty-states/inbox-zero` to specimen layout
 
 - **Problem.** Spikes 2 and 3 shipped on 2026-05-02 awaiting Vinson's explicit sign-off; the open-questions list named "migrate the other two plates" as a follow-up that would test the catalogue metaphor across plate types more diverse than just `centered-signin`. Holding the migration until explicit sign-off creates a chicken-and-egg: the eval is partly a question of *whether the metaphor scales*, which only the migration answers.
