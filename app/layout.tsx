@@ -29,10 +29,25 @@ const SITE_NAME = "V's Component Gallery";
 const SITE_URL = ">>> SITE_URL <<<";
 const AUTHOR = "Vinson";
 
+/**
+ * metadataBase resolution. Priority:
+ *   1. SITE_URL — the placeholder, swapped at finalization once vinsonfx.com
+ *      absorbs this gallery.
+ *   2. Vercel production URL — set automatically on the production deployment.
+ *   3. Vercel preview/branch URL — set automatically on preview deployments.
+ *   4. example.com — local-build fallback so URL parsing doesn't throw.
+ */
+function resolveSiteUrl(): string {
+  if (SITE_URL.startsWith("http")) return SITE_URL;
+  const prodHost = process.env.VERCEL_PROJECT_PRODUCTION_URL;
+  if (prodHost) return `https://${prodHost}`;
+  const previewHost = process.env.VERCEL_URL;
+  if (previewHost) return `https://${previewHost}`;
+  return "https://example.com";
+}
+
 export const metadata: Metadata = {
-  metadataBase: new URL(
-    SITE_URL.startsWith("http") ? SITE_URL : "https://example.com",
-  ),
+  metadataBase: new URL(resolveSiteUrl()),
   title: {
     default: SITE_NAME,
     template: `%s · ${SITE_NAME}`,
