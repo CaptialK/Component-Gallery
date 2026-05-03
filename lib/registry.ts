@@ -21,6 +21,13 @@ export type ComponentEntry = {
    * `default` layout.
    */
   aspectRatio?: string;
+  /**
+   * Plate max width in px, for `layout: "specimen"`. Defaults to 600. Bump
+   * for components that need more room to read (e.g. app-shells with their
+   * own internal sidebar/topbar). When > 600 the left-margin № watermark
+   * waits for `xl` breakpoint instead of `lg` to avoid cramping.
+   */
+  maxWidth?: number;
   load: () => Promise<{ default: ComponentType }>;
 };
 
@@ -43,7 +50,8 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Sidebar + topbar + content area. The chrome itself is the showcase.",
     layout: "specimen",
-    aspectRatio: "16 / 10",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
     load: () => import("@/components/showcase/layouts/app-shell"),
   },
   {

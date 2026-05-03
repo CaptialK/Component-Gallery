@@ -69,6 +69,7 @@ export default async function ComponentPage({
         plateNumber={plateNumber}
         source={<SourceViewer code={source} />}
         aspectRatio={entry.aspectRatio}
+        maxWidth={entry.maxWidth}
       >
         <Loaded />
       </SpecimenShell>

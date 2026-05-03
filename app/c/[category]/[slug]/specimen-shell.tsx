@@ -38,17 +38,23 @@ export function SpecimenShell({
   plateNumber,
   source,
   aspectRatio = "5 / 6",
+  maxWidth = 600,
   children,
 }: {
   entry: EntryShape;
   plateNumber: string;
   source: React.ReactNode;
   aspectRatio?: string;
+  maxWidth?: number;
   children: React.ReactNode;
 }) {
   const [sourceOpen, setSourceOpen] = React.useState(false);
   const categoryLabel = getCategoryLabel(entry.category);
   const panelId = React.useId();
+  const widthStyle = { maxWidth: `${maxWidth}px` };
+  // Wide plates (>600px) push the № watermark out to the xl breakpoint —
+  // at lg there isn't enough side margin to host it without cramping.
+  const watermarkVisibility = maxWidth > 600 ? "hidden xl:block" : "hidden lg:block";
 
   // ESC closes the panel.
   React.useEffect(() => {
@@ -94,17 +100,20 @@ export function SpecimenShell({
       {/* Plate + fade bands + colophon column. */}
       <div className="flex min-h-dvh flex-col items-center px-8 py-24">
         {/* Top halftone fade — paper transitioning into the plate. */}
-        <FadeBand height={80} direction="into" />
+        <FadeBand height={80} direction="into" maxWidth={maxWidth} />
 
         <div
           data-plate={entry.slug}
-          className="relative w-full max-w-[600px]"
-          style={{ aspectRatio }}
+          className="relative w-full"
+          style={{ ...widthStyle, aspectRatio }}
         >
-          {/* Left-margin № watermark — lg+ only. */}
+          {/* Left-margin № watermark — gated on lg or xl depending on plate width. */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute right-full top-1/2 hidden -translate-y-1/2 select-none pr-16 lg:block"
+            className={cn(
+              "pointer-events-none absolute right-full top-1/2 -translate-y-1/2 select-none pr-16",
+              watermarkVisibility,
+            )}
           >
             <div
               className="whitespace-nowrap font-display leading-none text-[var(--color-text-muted)] opacity-25"
@@ -130,10 +139,10 @@ export function SpecimenShell({
         </div>
 
         {/* Bottom halftone fade — plate transitioning back to paper. */}
-        <FadeBand height={80} direction="out" />
+        <FadeBand height={80} direction="out" maxWidth={maxWidth} />
 
         {/* Colophon sits below the bottom fade with explicit breath. */}
-        <div className="mt-12 w-full max-w-[600px]">
+        <div className="mt-12 w-full" style={widthStyle}>
           <Colophon
             sourceOpen={sourceOpen}
             panelId={panelId}
@@ -201,9 +210,11 @@ export function SpecimenShell({
 function FadeBand({
   height = 80,
   direction,
+  maxWidth = 600,
 }: {
   height?: number;
   direction: "into" | "out";
+  maxWidth?: number;
 }) {
   const peakDensity = 0.7;
   const density =
@@ -215,11 +226,11 @@ function FadeBand({
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none w-full max-w-[600px]"
-      style={{ height: `${height}px` }}
+      className="pointer-events-none w-full"
+      style={{ height: `${height}px`, maxWidth: `${maxWidth}px` }}
     >
       <DotField
-        shape={{ kind: "rect", width: 600, height }}
+        shape={{ kind: "rect", width: maxWidth, height }}
         spacing={5}
         dotRadius={1.1}
         baseDensity={1}
@@ -248,7 +259,7 @@ function Colophon({
 }) {
   return (
     <div
-      className="w-full max-w-[600px] text-center font-display text-[12px] italic leading-[1.7] text-[var(--color-text-muted)] [text-wrap:balance]"
+      className="w-full text-center font-display text-[12px] italic leading-[1.7] text-[var(--color-text-muted)] [text-wrap:balance]"
       style={{ fontVariationSettings: '"opsz" 18, "SOFT" 30' }}
     >
       Set in Fraunces 96/96 SOFT 30, Geist Sans 14/21, Geist Mono 13/19.
