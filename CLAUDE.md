@@ -13,18 +13,23 @@ working sketchbook, not a polished marketing site.
 
 If components come out looking like default shadcn, you've failed.
 
-- **Base layer** is restrained: generous whitespace, Inter for UI, JetBrains
-  Mono for code, subtle borders, small radii (4–10px), no gradients on chrome,
-  no shadows except on elevated overlays.
-- **Pointillism accent** is two-tone (ink + accent dots) and used **only** in:
-  - the home hero
-  - empty-state illustrations
-  - the 404 page
-  - decorative section dividers
-  - the brand mark
+- **Base layer** is restrained: generous whitespace, Geist Sans for body, Geist
+  Mono for code, Fraunces (SOFT-30, opsz 96) for display, subtle borders, small
+  radii (4–10px), no gradients on chrome, no shadows except on elevated overlays.
+- **Pointillism accent** is two-tone (walnut ink + Federal Blue) and lives in
+  the *state and rhythm* of controls, not their interiors:
+  - focus rings (radial-gradient halo on `::after`; 2px dotted outline fallback
+    for replaced elements)
+  - text selection color (Federal Blue at 30% alpha)
+  - loading skeletons (blue-noise stipple at ~6% density)
+  - dividers and scroll progress
+  - the home hero, empty-state illustrations, the 404 page, the brand mark
 
-Component UI chrome itself stays clean — no dots inside buttons, inputs, table
-cells, etc. Use `components/_kit/dot-field.tsx` for any dot work.
+**Interior surfaces of controls stay flat** — no halftone fills inside button
+bodies, no dot patterns inside table cells, no stippled input strokes.
+*Perimeter, state, and rhythm of controls carry the language.* Use
+`components/_kit/dot-field.tsx` (Bridson Poisson-disc by default) for any dot
+work.
 
 ## Forbidden patterns
 
