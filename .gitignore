@@ -39,5 +39,6 @@ next-env.d.ts
 .idea
 .vscode
 
-# screenshots (regenerated)
-/public/previews/*.png
+# Plate previews are *committed* so Vercel deploys ship them as static
+# assets. Regenerate with `pnpm snap` (needs `pnpm dev` running) and
+# commit the new PNGs whenever a component's visuals change.
