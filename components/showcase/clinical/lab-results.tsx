@@ -1,19 +1,22 @@
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
-
 /**
  * Lab panel — comprehensive metabolic + complete blood count, with each
- * value placed on a stippled reference-range ribbon. The ribbon is the
- * dot-language commitment of this plate:
+ * value placed on a reference-range ribbon.
  *
- *  - The normal envelope is a Bridson density stripe; coverage crests at
- *    mid-normal and tapers at the edges. The eye reads the *normal zone*
- *    before reading any number.
- *  - The patient's value is marked by one bigger dot — Federal Blue when
- *    in-range, persimmon when out-of-range. Off-scale values cap with an
- *    edge arrow rather than disappearing.
+ * Refactored 2026-05-03 per the dot+line system change in DECISIONS.md
+ * (the dots-as-background retrospective). The ribbon used to render the
+ * normal envelope as a Bridson density stripe; Vinson reviewed and reported
+ * it made the test results hard to read. Now:
+ *
+ *  - The reference range is a *line*: a faint full-track hairline + a
+ *    bolder line segment between the bracket ticks at refLo and refHi. The
+ *    eye reads the normal zone as a length, not as a texture.
+ *  - The patient's value is one dot — Federal Blue when in-range (with a
+ *    small halo of mark-dots — those are punctuation around the value, not
+ *    background), persimmon when out-of-range. Off-scale values cap with
+ *    an edge arrow.
  *  - Out-of-range gets a one-letter margin marker (H / L / HH / LL),
  *    *not* a coloured row background. Interior of the table cells stays
- *    flat — the chrome rule from `CLAUDE.md`.
+ *    flat per CLAUDE.md.
  *
  * Pure server component. Realistic reference ranges; mock values, no PHI.
  */
@@ -124,9 +127,10 @@ export default function LabResults() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Each row's stippled ribbon is the lab's reference range. The marker
-          is the patient's value: Federal Blue inside the normal envelope,
-          persimmon outside. Margin letters carry the analytical readout.
+          Each row's ribbon is the lab's reference range as a line — bolder
+          inside the normal envelope, hairline outside. The marker is the
+          patient's value: Federal Blue inside, persimmon outside. Margin
+          letters carry the analytical readout.
         </p>
       </div>
     </div>
@@ -264,34 +268,7 @@ function RangeRibbon({
   const xRefHi = xOf(lab.refHi);
   const valueX = xOf(value);
   const inRange = severity === "normal";
-
-  // Build the Bridson density stripe that rests inside the normal envelope.
-  const points = poissonDisc({
-    width: RIBBON_W,
-    height: RIBBON_H,
-    radius: 2.4,
-    seed: lab.name.length * 11,
-  });
-  const rng = mulberry32(lab.name.length * 19);
-  const dots = points.flatMap((p, i) => {
-    const inside = p.x >= xRefLo && p.x <= xRefHi;
-    const t = inside
-      ? (p.x - xRefLo) / Math.max(1, xRefHi - xRefLo) // 0..1 across normal
-      : 0;
-    // Crest at mid-band, taper to band edges; nothing outside the band.
-    const dens = inside ? 1 - Math.abs(t * 2 - 1) : 0;
-    if (rng() > 0.45 + dens * 0.5) return [];
-    return [
-      <circle
-        key={`d-${i}`}
-        cx={p.x}
-        cy={p.y}
-        r={0.7}
-        fill="var(--color-text)"
-        opacity={0.45}
-      />,
-    ];
-  });
+  const yMid = RIBBON_H / 2;
 
   return (
     <svg
@@ -302,24 +279,36 @@ function RangeRibbon({
       role="img"
       aria-label={`Reference range ${lab.refLo}–${lab.refHi} ${lab.unit}; value ${value}`}
     >
-      {/* Track hairline. */}
+      {/* Faint full-track hairline. */}
       <line
         x1={1}
         x2={RIBBON_W - 1}
-        y1={RIBBON_H / 2}
-        y2={RIBBON_H / 2}
+        y1={yMid}
+        y2={yMid}
         stroke="var(--color-border)"
         strokeWidth="0.4"
       />
 
-      {/* Normal-envelope bracket — short ticks at the band edges. */}
+      {/* Normal envelope as a bolder line segment between the bracket ticks.
+          This replaced a Bridson density stripe (DECISIONS.md 2026-05-03). */}
+      <line
+        x1={xRefLo}
+        x2={xRefHi}
+        y1={yMid}
+        y2={yMid}
+        stroke="var(--color-text-muted)"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+      />
+
+      {/* Bracket ticks at the band edges. */}
       <line
         x1={xRefLo}
         x2={xRefLo}
         y1={3}
         y2={RIBBON_H - 3}
         stroke="var(--color-border-strong)"
-        strokeWidth="0.5"
+        strokeWidth="0.6"
       />
       <line
         x1={xRefHi}
@@ -327,22 +316,18 @@ function RangeRibbon({
         y1={3}
         y2={RIBBON_H - 3}
         stroke="var(--color-border-strong)"
-        strokeWidth="0.5"
+        strokeWidth="0.6"
       />
 
-      {/* Stippled normal envelope. */}
-      {dots}
-
-      {/* Value marker. Off-scale values render as a chevron at the strip edge
-          (so values that "exit the chart" still place themselves visibly). */}
+      {/* Value marker. Off-scale values render as a chevron at the strip edge. */}
       {offScale ? (
         <ValueChevron
           x={value < vMin ? 0 : RIBBON_W}
-          y={RIBBON_H / 2}
+          y={yMid}
           dir={value < vMin ? "left" : "right"}
         />
       ) : (
-        <ValueDot x={valueX} y={RIBBON_H / 2} inRange={inRange} />
+        <ValueDot x={valueX} y={yMid} inRange={inRange} />
       )}
     </svg>
   );
