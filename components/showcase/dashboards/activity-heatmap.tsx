@@ -1,3 +1,6 @@
+"use client";
+
+import { useMemo, useState } from "react";
 import { mulberry32 } from "@/components/_kit/dot-noise";
 
 /**
@@ -20,11 +23,16 @@ import { mulberry32 } from "@/components/_kit/dot-noise";
  * Sqrt scaling on r² means equal value deltas produce equal area deltas —
  * what your eye actually compares.
  *
- * Bertin honesty: even with area encoding (rank 5 of 7), each cell carries
- * a native `<title>` tooltip with the raw number — area is "ambient
- * pattern," tooltip is "analytical readout."
+ * Bertin honesty: each cell still carries an `aria-label` with the raw
+ * number for screen readers, but the visual readout is now a custom
+ * in-SVG tooltip (Spike 3 v1 polish, 2026-05-04) — appears on hover with
+ * no delay, replacing the native `<title>` element which had the browser's
+ * ~500ms tooltip delay. Native `<title>` is dropped to avoid the
+ * double-tooltip you'd otherwise get when both appear.
  *
- * Pure server component — no client state, no hover JS.
+ * Client component — uses local state to track the hovered cell. The
+ * SVG itself is still composed deterministically; only the tooltip
+ * overlay reacts to hover.
  */
 
 const WEEKS = 53;
@@ -100,10 +108,19 @@ function dateLabel(week: number, day: number): string {
   return `${MONTHS[m]} ${ordinal(d + 1)}`;
 }
 
+/** Accessible-name string for a cell — replaces what the native <title>
+ *  used to carry. */
+function describeCell(c: Cell): string {
+  const n = c.value === 0 ? "no" : c.value;
+  const s = c.value === 1 ? "" : "s";
+  return `${n} contribution${s} on ${dayLabel(c.day)}, ${dateLabel(c.week, c.day)}`;
+}
+
 export default function ActivityHeatmap() {
-  const cells = generateActivity(42);
-  const max = cells.reduce((m, c) => Math.max(m, c.value), 0);
-  const total = cells.reduce((s, c) => s + c.value, 0);
+  const cells = useMemo(() => generateActivity(42), []);
+  const max = useMemo(() => cells.reduce((m, c) => Math.max(m, c.value), 0), [cells]);
+  const total = useMemo(() => cells.reduce((s, c) => s + c.value, 0), [cells]);
+  const [hovered, setHovered] = useState<Cell | null>(null);
 
   // Layout sizes (SVG user units).
   const dayLabelGutter = 26;
@@ -190,17 +207,23 @@ export default function ActivityHeatmap() {
               const r = radiusFor(c.value, max);
               const tx = c.week * STEP;
               const ty = c.day * STEP;
+              const label = describeCell(c);
               return (
                 <g
                   key={`${c.week}-${c.day}`}
+                  role="img"
+                  aria-label={label}
                   transform={`translate(${tx} ${ty})`}
+                  onMouseEnter={() => setHovered(c)}
+                  onMouseLeave={() =>
+                    setHovered((prev) =>
+                      prev && prev.week === c.week && prev.day === c.day
+                        ? null
+                        : prev,
+                    )
+                  }
                 >
-                  <title>
-                    {c.value === 0 ? "no" : c.value} contribution
-                    {c.value === 1 ? "" : "s"} on {dayLabel(c.day)},{" "}
-                    {dateLabel(c.week, c.day)}
-                  </title>
-                  {/* Invisible cell rect carries the tooltip hover area for
+                  {/* Invisible cell rect carries the hover hit area for
                       cells with very small dots. */}
                   <rect
                     width={CELL}
@@ -268,6 +291,18 @@ export default function ActivityHeatmap() {
               {max} / day
             </text>
           </g>
+
+          {/* Custom tooltip — rendered last so it paints on top of the
+              grid. Pointer-events disabled so it can't intercept hover. */}
+          {hovered && (
+            <CellTooltip
+              cell={hovered}
+              dayLabelGutter={dayLabelGutter}
+              monthLabelHeight={monthLabelHeight}
+              totalWidth={totalWidth}
+              gridHeight={gridHeight}
+            />
+          )}
         </svg>
 
         {/* Footer caption — small, italic, Fraunces. Closes the dashboard
@@ -287,5 +322,93 @@ export default function ActivityHeatmap() {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * In-SVG tooltip. Two stacked text lines: mono-caps date eyebrow over a
+ * Fraunces italic count. Anchored above the hovered cell, flips below for
+ * the top row, clamped to the SVG width so it never overflows. No browser
+ * tooltip delay — appears the moment hover state updates.
+ */
+function CellTooltip({
+  cell,
+  dayLabelGutter,
+  monthLabelHeight,
+  totalWidth,
+  gridHeight,
+}: {
+  cell: Cell;
+  dayLabelGutter: number;
+  monthLabelHeight: number;
+  totalWidth: number;
+  gridHeight: number;
+}) {
+  const TIP_W = 92;
+  const TIP_H = 22;
+  const MARGIN = 4;
+
+  const cellCenterX = dayLabelGutter + cell.week * STEP + CELL / 2;
+  const cellTop = monthLabelHeight + cell.day * STEP;
+  const cellBottom = cellTop + CELL;
+
+  const aboveY = cellTop - TIP_H - MARGIN;
+  const belowY = cellBottom + MARGIN;
+  // Flip below the cell when there's no room above (top row).
+  // Also flip if below would crowd the legend.
+  const useBelow = aboveY < 0 && belowY + TIP_H <= monthLabelHeight + gridHeight + 4;
+  const y = useBelow ? belowY : Math.max(0, aboveY);
+
+  const xRaw = cellCenterX - TIP_W / 2;
+  const x = Math.max(0, Math.min(totalWidth - TIP_W, xRaw));
+
+  const date = `${dayLabel(cell.day).toUpperCase()} · ${dateLabel(cell.week, cell.day).toUpperCase()}`;
+  const count =
+    cell.value === 0
+      ? "no contributions"
+      : `${cell.value} contribution${cell.value === 1 ? "" : "s"}`;
+
+  return (
+    <g
+      transform={`translate(${x} ${y})`}
+      pointerEvents="none"
+      aria-hidden
+    >
+      <rect
+        width={TIP_W}
+        height={TIP_H}
+        fill="var(--color-bg)"
+        stroke="var(--color-border-strong)"
+        strokeWidth={0.5}
+        rx={2}
+      />
+      <text
+        x={TIP_W / 2}
+        y={9}
+        textAnchor="middle"
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 6,
+          letterSpacing: "0.16em",
+          fill: "var(--color-text-muted)",
+        }}
+      >
+        {date}
+      </text>
+      <text
+        x={TIP_W / 2}
+        y={18}
+        textAnchor="middle"
+        style={{
+          fontFamily: "var(--font-display)",
+          fontSize: 8.5,
+          fontStyle: "italic",
+          fontVariationSettings: '"opsz" 18, "SOFT" 30',
+          fill: "var(--color-text)",
+        }}
+      >
+        {count}
+      </text>
+    </g>
   );
 }
