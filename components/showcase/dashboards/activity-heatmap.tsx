@@ -37,7 +37,7 @@ import { mulberry32 } from "@/components/_kit/dot-noise";
 
 const WEEKS = 53;
 const DAYS = 7;
-const CELL = 10;
+const CELL = 13;
 const GAP = 1;
 const STEP = CELL + GAP;
 
@@ -123,36 +123,42 @@ export default function ActivityHeatmap() {
   const [hovered, setHovered] = useState<Cell | null>(null);
 
   // Layout sizes (SVG user units).
-  const dayLabelGutter = 26;
-  const monthLabelHeight = 14;
+  const dayLabelGutter = 32;
+  const monthLabelHeight = 18;
   const gridWidth = WEEKS * STEP - GAP;
   const gridHeight = DAYS * STEP - GAP;
-  const legendGap = 18;
-  const legendHeight = 22;
+  const legendGap = 24;
+  const legendHeight = 28;
   const totalWidth = dayLabelGutter + gridWidth;
   const totalHeight =
     monthLabelHeight + gridHeight + legendGap + legendHeight;
 
   return (
     <div className="grid h-full w-full place-items-center bg-[var(--color-bg)] px-7 py-8">
-      <div className="w-full max-w-[560px]">
+      <div className="w-full max-w-[760px]">
         {/* Header */}
-        <div className="mb-5 flex items-baseline justify-between">
+        <div className="mb-6 flex items-baseline justify-between">
           <h2
-            className="font-display text-[19px] italic leading-none text-[var(--color-text)]"
-            style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+            className="font-display text-[24px] italic leading-none text-[var(--color-text)]"
+            style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
           >
             Activity, last year.
           </h2>
-          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+          <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
             {total.toLocaleString()} contributions
           </div>
         </div>
 
-        {/* Heatmap SVG. */}
+        {/* Heatmap SVG. Wrapped in a horizontal-scroll container with a
+            min-width so cells stay legibly sized on narrow viewports
+            (mobile, sidebar-collapsed app shells). 53 weeks at any readable
+            cell size means the grid is naturally ~700+ px wide; on smaller
+            viewports the user scrolls instead of squinting at 6-px dots. */}
+        <div className="-mx-1 overflow-x-auto pb-1">
         <svg
           viewBox={`0 0 ${totalWidth} ${totalHeight}`}
           className="block w-full"
+          style={{ minWidth: 680 }}
           role="img"
           aria-label={`Contribution heatmap. ${total} total contributions across ${WEEKS} weeks; peak day ${max}.`}
         >
@@ -166,11 +172,11 @@ export default function ActivityHeatmap() {
                 <text
                   key={m}
                   x={x}
-                  y={monthLabelHeight - 4}
+                  y={monthLabelHeight - 5}
                   className="fill-[var(--color-text-muted)]"
                   style={{
                     fontFamily: "var(--font-mono)",
-                    fontSize: 7,
+                    fontSize: 9,
                     letterSpacing: "0.18em",
                     textTransform: "uppercase",
                   }}
@@ -187,11 +193,11 @@ export default function ActivityHeatmap() {
               <text
                 key={label}
                 x={0}
-                y={index * STEP + STEP - 2}
+                y={index * STEP + STEP - 3}
                 className="fill-[var(--color-text-muted)]"
                 style={{
                   fontFamily: "var(--font-mono)",
-                  fontSize: 7,
+                  fontSize: 9,
                   letterSpacing: "0.18em",
                   textTransform: "uppercase",
                 }}
@@ -256,7 +262,7 @@ export default function ActivityHeatmap() {
               className="fill-[var(--color-text-muted)]"
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 7,
+                fontSize: 9,
                 letterSpacing: "0.12em",
               }}
             >
@@ -267,7 +273,7 @@ export default function ActivityHeatmap() {
               return (
                 <g
                   key={i}
-                  transform={`translate(${18 + i * (CELL + 2)} 0)`}
+                  transform={`translate(${22 + i * (CELL + 3)} 0)`}
                 >
                   <circle
                     cx={CELL / 2}
@@ -279,12 +285,12 @@ export default function ActivityHeatmap() {
               );
             })}
             <text
-              x={18 + 5 * (CELL + 2) + 4}
+              x={22 + 5 * (CELL + 3) + 5}
               y={CELL - 1}
               className="fill-[var(--color-text-muted)]"
               style={{
                 fontFamily: "var(--font-mono)",
-                fontSize: 7,
+                fontSize: 9,
                 letterSpacing: "0.12em",
               }}
             >
@@ -304,11 +310,12 @@ export default function ActivityHeatmap() {
             />
           )}
         </svg>
+        </div>
 
-        {/* Footer caption — small, italic, Fraunces. Closes the dashboard
-            with a typeset note rather than a chart axis. */}
+        {/* Footer caption — italic Fraunces. Closes the dashboard with a
+            typeset note rather than a chart axis. */}
         <p
-          className="mt-6 text-[11px] italic leading-relaxed text-[var(--color-text-muted)]"
+          className="mt-7 text-[13px] italic leading-relaxed text-[var(--color-text-muted)]"
           style={{
             fontFamily: "var(--font-display)",
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
@@ -344,9 +351,9 @@ function CellTooltip({
   totalWidth: number;
   gridHeight: number;
 }) {
-  const TIP_W = 92;
-  const TIP_H = 22;
-  const MARGIN = 4;
+  const TIP_W = 140;
+  const TIP_H = 34;
+  const MARGIN = 6;
 
   const cellCenterX = dayLabelGutter + cell.week * STEP + CELL / 2;
   const cellTop = monthLabelHeight + cell.day * STEP;
@@ -379,17 +386,17 @@ function CellTooltip({
         height={TIP_H}
         fill="var(--color-bg)"
         stroke="var(--color-border-strong)"
-        strokeWidth={0.5}
-        rx={2}
+        strokeWidth={0.7}
+        rx={3}
       />
       <text
         x={TIP_W / 2}
-        y={9}
+        y={13}
         textAnchor="middle"
         style={{
           fontFamily: "var(--font-mono)",
-          fontSize: 6,
-          letterSpacing: "0.16em",
+          fontSize: 8,
+          letterSpacing: "0.18em",
           fill: "var(--color-text-muted)",
         }}
       >
@@ -397,13 +404,13 @@ function CellTooltip({
       </text>
       <text
         x={TIP_W / 2}
-        y={18}
+        y={27}
         textAnchor="middle"
         style={{
           fontFamily: "var(--font-display)",
-          fontSize: 8.5,
+          fontSize: 12,
           fontStyle: "italic",
-          fontVariationSettings: '"opsz" 18, "SOFT" 30',
+          fontVariationSettings: '"opsz" 24, "SOFT" 30',
           fill: "var(--color-text)",
         }}
       >

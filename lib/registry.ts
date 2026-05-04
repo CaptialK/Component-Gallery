@@ -93,6 +93,7 @@ export const REGISTRY: ComponentEntry[] = [
       "Area-as-data: one dot per cell, sized by the day's value. Sqrt-scaled radius keeps equal value deltas perceptually uniform.",
     layout: "specimen",
     aspectRatio: "4 / 3",
+    maxWidth: 880,
     load: () => import("@/components/showcase/dashboards/activity-heatmap"),
   },
   {
