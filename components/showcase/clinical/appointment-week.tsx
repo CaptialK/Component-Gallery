@@ -1,23 +1,17 @@
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
-
 /**
  * Appointment week — outpatient scheduler. Seven columns (Mon–Sun), eleven
  * half-hour rows from 08:00 to 13:30. Appointment blocks sit on the grid;
- * free slots have a faint Bridson backdrop so the eye reads "available
- * surface" instead of "empty cell."
+ * empty cells stay flat so the eye reads "open slot" without ambient noise.
  *
  * Dot-language commitments specific to this plate:
  *
- *  - Free-time backdrop is a single Bridson stipple at ~3% coverage —
- *    canon-floor — across the whole grid. Appointment blocks paint over it
- *    with a flat surface (interior stays clean per the chrome rule).
- *  - Each appointment header carries a small density indicator whose
- *    coverage encodes block duration. 30-min ≈ 4%, 60-min ≈ 8%, 90-min
- *    ≈ 12%. Same primitive carrying time on a different axis than the
- *    medication-list strip.
+ *  - Empty grid cells stay flat — duration is encoded by block height, type
+ *    by the left-edge ink, and "now" by a Federal Blue hairline. The earlier
+ *    Bridson free-time backdrop and per-block density-stipple were removed
+ *    in the dot+line system pass (DECISIONS.md 2026-05-03 retrospective):
+ *    grid cells beneath data values stay flat, and quantitative encoding
+ *    prefers length over density.
  *  - "Now" is a Federal Blue hairline crossing today's column.
- *  - Telehealth visits get a stippled top edge (the "ribbon" that says
- *    this one isn't in person); in-person visits don't.
  *
  * Pure server component. Mock schedule, no PHI.
  */
@@ -102,9 +96,8 @@ export default function AppointmentWeek() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Free time stipples at the canon floor; appointment headers carry a
-          density indicator whose coverage encodes duration. Federal Blue
-          hairline crosses today's column at the present minute.
+          Block height encodes duration; left-edge ink encodes visit type.
+          Federal Blue hairline crosses today's column at the present minute.
         </p>
       </div>
     </div>
@@ -182,11 +175,6 @@ function Grid() {
           );
         })}
 
-        {/* Free-time backdrop — single Bridson stipple, painted across all
-            seven day columns. Coverage at floor (~3%); appointment surfaces
-            paint over it. */}
-        <FreeTimeBackdrop rows={rows} />
-
         {/* Now hairline (today's column only). */}
         <NowHairline />
 
@@ -203,56 +191,6 @@ function fmtH(h: number): string {
   const wholeH = Math.floor(h);
   const m = (h - wholeH) * 60;
   return `${String(wholeH).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
-/**
- * Free-time stipple. Renders one absolute-positioned strip per day column,
- * each with a fresh Bridson seed, so columns don't read as identical
- * patterns. Coverage at canon floor (~3%) — present, not insistent.
- */
-function FreeTimeBackdrop({ rows }: { rows: number }) {
-  const totalH = rows * ROW_H;
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none absolute inset-0 grid grid-cols-[56px_repeat(7,1fr)]"
-    >
-      <div />
-      {DAY_LABELS.map((_, i) => (
-        <FreeColumnStipple key={i} h={totalH} seed={1009 + i * 71} />
-      ))}
-    </div>
-  );
-}
-
-function FreeColumnStipple({ h, seed }: { h: number; seed: number }) {
-  // Render at a virtual width; SVG scales horizontally via preserveAspectRatio.
-  const W = 100;
-  const points = poissonDisc({ width: W, height: h, radius: 7, seed });
-  const rng = mulberry32(seed + 1);
-  return (
-    <svg
-      width={W}
-      height={h}
-      viewBox={`0 0 ${W} ${h}`}
-      preserveAspectRatio="none"
-      className="block h-full w-full opacity-50"
-    >
-      {points.map((p, i) => {
-        if (rng() > 0.55) return null;
-        return (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={0.85}
-            fill="var(--color-text)"
-            opacity={0.4}
-          />
-        );
-      })}
-    </svg>
-  );
 }
 
 function NowHairline() {
@@ -294,9 +232,6 @@ function AppointmentBlock({ v }: { v: Visit }) {
           : "var(--color-text)";
   const dim = v.status === "no-show" || v.status === "tentative";
 
-  // Density indicator coverage encodes duration: 0.5h → ~4%, 1h → ~8%, 1.5h → ~12%.
-  const durDensity = Math.min(0.85, v.duration * 0.55);
-
   return (
     <div
       className="absolute left-0 right-0 grid grid-cols-[56px_repeat(7,1fr)]"
@@ -318,7 +253,6 @@ function AppointmentBlock({ v }: { v: Visit }) {
               pointerEvents: "auto",
             }}
           >
-            {/* Header strip with duration stipple */}
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-1.5 py-0.5">
               <span
                 className="truncate font-mono text-[9px] uppercase tracking-[0.14em]"
@@ -326,10 +260,6 @@ function AppointmentBlock({ v }: { v: Visit }) {
               >
                 {fmtH(v.start)}
               </span>
-              <DurationStipple
-                density={durDensity}
-                seed={v.day * 13 + Math.round(v.start * 10)}
-              />
             </div>
             <div className="px-1.5 py-1 leading-tight">
               <div
@@ -352,26 +282,3 @@ function AppointmentBlock({ v }: { v: Visit }) {
   );
 }
 
-function DurationStipple({ density, seed }: { density: number; seed: number }) {
-  const W = 24;
-  const H = 8;
-  const points = poissonDisc({ width: W, height: H, radius: 1.8, seed });
-  const rng = mulberry32(seed + 11);
-  return (
-    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} className="block">
-      {points.map((p, i) => {
-        if (rng() > density) return null;
-        return (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={0.55}
-            fill="var(--color-text-muted)"
-            opacity={0.7}
-          />
-        );
-      })}
-    </svg>
-  );
-}

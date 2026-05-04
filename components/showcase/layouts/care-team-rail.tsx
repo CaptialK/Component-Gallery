@@ -1,5 +1,5 @@
 import { Phone, Plus } from "lucide-react";
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
+import { poissonDisc } from "@/components/_kit/dot-noise";
 
 /**
  * Care team rail — a narrow vertical surface listing the people responsible
@@ -15,8 +15,11 @@ import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
  *  - The on-call provider's row gets a Federal Blue marginal stipple — a
  *    hairline trail of dots in the gutter — so a clinician scanning the
  *    rail finds them in a glance even before reading the role.
- *  - Avatars are stippled monograms (same primitive as the chart-header
- *    plate); coherence across the catalogue.
+ *  - Avatars are clean ringed monograms. The chart-header plate carries the
+ *    stippled-monogram primitive at hero scale; here at 32px the stipple
+ *    crowded the initials, so the rail uses the triage-queue / bed-board
+ *    monogram vocabulary instead (DECISIONS.md 2026-05-03 retrospective —
+ *    text on dot fields fails at small scale).
  *
  * Pure server component.
  */
@@ -184,47 +187,16 @@ function Row({ member }: { member: Member }) {
 }
 
 function Avatar({ initials, dim }: { initials: string; dim?: boolean }) {
-  // Stippled monogram — same primitive as the chart-header plate, smaller.
-  const size = 32;
-  const points = poissonDisc({
-    width: size,
-    height: size,
-    radius: 2.4,
-    seed: initials.charCodeAt(0) * 13 + initials.charCodeAt(1),
-  });
-  const rng = mulberry32(initials.charCodeAt(0) * 19);
-  const c = size / 2;
-  const ink = dim ? "var(--color-border-strong)" : "var(--color-text)";
-
   return (
-    <div className="relative h-8 w-8 shrink-0">
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {points.flatMap((p, i) => {
-          const dx = (p.x - c) / c;
-          const dy = (p.y - c) / c;
-          const r = Math.sqrt(dx * dx + dy * dy);
-          if (r > 1) return [];
-          const dens = Math.max(0.15, 1 - r * 0.7);
-          if (rng() > dens * 0.85) return [];
-          return [
-            <circle
-              key={i}
-              cx={p.x}
-              cy={p.y}
-              r={0.75}
-              fill={ink}
-              opacity={dim ? 0.5 : 0.85}
-            />,
-          ];
-        })}
-      </svg>
-      <div
-        className="absolute inset-0 grid place-items-center font-mono text-[11px] tracking-tight text-[var(--color-text)]"
-        style={{ opacity: dim ? 0.55 : 1 }}
-      >
-        {initials}
-      </div>
-    </div>
+    <span
+      className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--color-bg)] font-mono text-[11px] tracking-tight ring-1 ring-[var(--color-border)]"
+      style={{
+        color: dim ? "var(--color-text-muted)" : "var(--color-text)",
+        opacity: dim ? 0.7 : 1,
+      }}
+    >
+      {initials}
+    </span>
   );
 }
 

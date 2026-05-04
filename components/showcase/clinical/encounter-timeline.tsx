@@ -9,28 +9,25 @@ import {
   Stethoscope,
   type LucideIcon,
 } from "lucide-react";
-import { mulberry32 } from "@/components/_kit/dot-noise";
 
 /**
  * Encounter timeline — chronological event log for a hospital admission.
- * The thread connecting events is a Bridson dot trail; the gap between
- * events is the gap in the trail. Read top-to-bottom, the visual answers
- * "how busy was this admission, and where did things cluster" before the
- * eye reads any individual event.
+ * Events are nodes; the thread between them is a hairline. Read top-to-bottom,
+ * the visual answers "what happened in what order" before the eye reads any
+ * individual event.
  *
  * Dot-language commitments specific to this plate:
  *
- *  - The connecting trail's local density encodes time-since-last-event.
- *    Closely-spaced events get a denser run; long quiet stretches go sparse.
- *    Cleveland-McGill puts area above density for quantitative reading,
- *    but here time *should* read as ambient pattern; the timestamps
- *    themselves are the analytical readout.
+ *  - The connecting thread is a vertical hairline. Earlier versions used a
+ *    Bridson dot trail with density encoding time-since-prev; the dot+line
+ *    system pass (DECISIONS.md 2026-05-03 retrospective) reframes this:
+ *    connection between events is a *line*, the timestamps in the gutter
+ *    carry the gap analytically.
  *  - Each event row carries a single Federal Blue dot in its gutter — the
  *    "still happening" mark on the most recent event, plain walnut on the
  *    rest. Same vocabulary as the vitals live-marker.
- *  - The admit and discharge anchors get a small stippled crosshair (the
- *    same registration mark the plate frame uses) — they bracket the
- *    encounter the way the plate frame brackets the gallery.
+ *  - The "ongoing" tail under the last event is still a Bridson dot trail —
+ *    open-ended, no terminus, hand-set into the rhythm of the plate.
  *
  * Pure server component. Realistic but synthetic admission, no PHI.
  */
@@ -111,10 +108,9 @@ export default function EncounterTimeline() {
           <ol className="relative">
             {EVENTS.map((e, i) => {
               const prev = i > 0 ? EVENTS[i - 1] : null;
-              const gap = prev ? e.minutes - prev.minutes : 0;
               const isLast = i === lastIdx;
               return (
-                <Row key={i} event={e} previous={prev} gap={gap} isLast={isLast} />
+                <Row key={i} event={e} previous={prev} isLast={isLast} />
               );
             })}
             {/* Open-ended thread below the last event signaling "still
@@ -138,12 +134,10 @@ export default function EncounterTimeline() {
 function Row({
   event,
   previous,
-  gap,
   isLast,
 }: {
   event: TimelineEvent;
   previous: TimelineEvent | null;
-  gap: number;
   isLast: boolean;
 }) {
   const Icon = KIND_ICON[event.kind];
@@ -161,8 +155,8 @@ function Row({
 
       {/* Thread + node column */}
       <div className="relative flex h-full items-start justify-center">
-        {/* Connecting trail above this event. Density encodes time-since-prev. */}
-        {previous && <ConnectingTrail gapMinutes={gap} />}
+        {/* Connecting hairline above this event. */}
+        {previous && <ConnectingThread />}
         {/* Live ring around the most recent event. */}
         {isLast && <LiveRing />}
         <Node icon={Icon} flagged={!!event.flagged} isLast={isLast} kind={event.kind} />
@@ -242,45 +236,13 @@ function LiveRing() {
   );
 }
 
-/**
- * The connecting trail — vertical Bridson dots between this event and the
- * previous. Coverage scales with elapsed minutes: tighter clusters when
- * events are close in time, sparser runs across hours of quiet.
- */
-function ConnectingTrail({ gapMinutes }: { gapMinutes: number }) {
-  // Map gap to keep-probability (canon-bounded). 0 min → ~22%, 240+ min → ~3%.
-  const dens = Math.max(0.14, Math.min(1, 1 - gapMinutes / 320));
-  const W = 8;
-  // Vertical extent: trail rises from the node's top edge to the previous
-  // node's bottom — px-3 on each side of the row + ~24px nominal gap.
-  const H = 36;
-  const points: { x: number; y: number }[] = [];
-  // Run a tiny Bridson manually along the column so we don't repeat pattern.
-  const rng = mulberry32(gapMinutes * 7 + 11);
-  for (let y = 1; y < H; y += 2) {
-    const x = W / 2 + (rng() - 0.5) * 4;
-    if (rng() > dens) continue;
-    points.push({ x, y });
-  }
+/** Vertical hairline thread between events. */
+function ConnectingThread() {
   return (
-    <svg
-      width={W}
-      height={H}
-      viewBox={`0 0 ${W} ${H}`}
-      aria-hidden="true"
-      className="pointer-events-none absolute left-1/2 -top-[36px] -translate-x-1/2"
-    >
-      {points.map((p, i) => (
-        <circle
-          key={i}
-          cx={p.x}
-          cy={p.y}
-          r={0.85}
-          fill="var(--color-text)"
-          opacity={0.55}
-        />
-      ))}
-    </svg>
+    <span
+      aria-hidden
+      className="pointer-events-none absolute left-1/2 -top-[36px] block h-9 w-px -translate-x-1/2 bg-[var(--color-border)]"
+    />
   );
 }
 

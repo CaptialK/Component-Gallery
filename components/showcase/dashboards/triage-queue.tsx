@@ -120,7 +120,7 @@ export default function TriageQueue() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Coverage encodes acuity; trail length encodes wait. Past each
+          Dot size encodes acuity; trail length encodes wait. Past each
           ESI's threshold the trail tints persimmon — at chart scale,
           that's the signal triage is slipping.
         </p>
@@ -189,20 +189,19 @@ function Row({ p }: { p: Patient }) {
 }
 
 /**
- * The acuity dot. ESI 1 → dense Federal Blue cluster; ESI 5 → sparse walnut.
- * Square cell so the eye can compare across rows. Numeral printed beside it
- * for the analytical readout.
+ * The acuity dot. Single sized dot; radius² scales with inverse ESI (ESI 1 =
+ * biggest, ESI 5 = smallest). Same area-as-data encoding as the activity
+ * heatmap and bed-board AcuityDot — Cleveland-McGill ranks area above density
+ * for quantitative reading. Numeral printed beside it for analytical readout.
+ * (Refactored 2026-05-03 from a five-step Bridson density ramp.)
  */
 function ESIDot({ esi }: { esi: Patient["esi"] }) {
   const cell = 22;
-  // Coverage-canon ramp: each step ≥1.5× the previous, all inside [0.03, 0.22].
-  // ESI 5 still reads as "barely there" (≈3.5%) without falling below floor.
-  const ESI_DENSITY: Record<number, number> = { 1: 0.95, 2: 0.78, 3: 0.55, 4: 0.32, 5: 0.18 };
-  const density = ESI_DENSITY[esi];
+  const norm = (5 - esi) / 4;
+  const minR = 1.6;
+  const maxR = 6;
+  const r = Math.sqrt(minR * minR + (maxR * maxR - minR * minR) * norm);
   const ink = esi <= 2 ? "var(--color-accent-2)" : "var(--color-text)";
-  const points = poissonDisc({ width: cell, height: cell, radius: 2.6, seed: esi * 17 });
-  const rng = mulberry32(esi * 91);
-  const dots = points.filter(() => rng() < density);
 
   return (
     <div className="inline-flex items-center gap-2">
@@ -213,9 +212,7 @@ function ESIDot({ esi }: { esi: Patient["esi"] }) {
         className="block"
         aria-hidden="true"
       >
-        {dots.map((p, i) => (
-          <circle key={i} cx={p.x} cy={p.y} r={0.95} fill={ink} />
-        ))}
+        <circle cx={cell / 2} cy={cell / 2} r={r} fill={ink} />
       </svg>
       <span
         className={

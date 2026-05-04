@@ -2,16 +2,16 @@
 
 import { useState } from "react";
 import { Save, Send } from "lucide-react";
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
 
 /**
  * SOAP note — Subjective, Objective, Assessment, Plan. The clinical artefact
  * a clinician writes after every encounter. Form chrome is the dot-language
  * commitment of this plate:
  *
- *  - Each section header carries a small "thoroughness" stipple whose
- *    coverage encodes how full the section currently is. The eye reads
- *    "what's drafted vs. blank" before reading the section heading.
+ *  - Each section header carries a thin completeness bar whose length encodes
+ *    how full the section currently is. Refactored 2026-05-03 from a Bridson
+ *    density stipple — the dot+line system pass moved quantitative encoding
+ *    from density to length per Cleveland-McGill (DECISIONS.md retrospective).
  *  - Textareas use the system focus halo (Federal Blue stippled annulus
  *    via the `::after` pseudo from `globals.css`). The selection colour
  *    is Federal Blue at 30% alpha — drag-select the prose to see it.
@@ -154,13 +154,11 @@ function Section({
   value: string;
   onChange: (v: string) => void;
 }) {
-  // Map prose length to a coverage ramp inside the locked print canon.
-  // 0 chars → 0.04 (sparse, signalling absence). 600+ chars → 0.22 (saturated
-  // but never flat). Saturating sigmoid so paragraph two doesn't double the
-  // coverage of paragraph one.
+  // Map prose length to a saturating completeness ramp. 0 chars → 0%, 600+
+  // chars → ~95%; sigmoid so paragraph two doesn't double the bar of paragraph
+  // one.
   const len = value.length;
   const norm = 1 - 1 / (1 + len / 220);
-  const density = 0.04 + norm * 0.22;
   const completeness = Math.round(norm * 100);
 
   return (
@@ -176,7 +174,7 @@ function Section({
           <span className="text-[15px] font-medium tracking-[-0.01em] text-[var(--color-text)]">
             {title}
           </span>
-          <ThoroughnessStipple density={density} seed={letter.charCodeAt(0)} />
+          <CompletenessBar fraction={norm} />
         </div>
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
           {completeness}% drafted
@@ -194,44 +192,20 @@ function Section({
 }
 
 /**
- * The completeness stipple. Width fixed at 80px so rows align across the
- * form. Density is the only signal — same primitive as the hero, just at
- * smaller scale. Single-tone (`accentRatio: 0`); the section letter carries
- * the typographic accent.
+ * The completeness bar. Width fixed at 80px so rows align across the form;
+ * the filled portion's length encodes prose length on the saturating ramp.
  */
-function ThoroughnessStipple({
-  density,
-  seed,
-}: {
-  density: number;
-  seed: number;
-}) {
-  const W = 80;
-  const H = 12;
-  const points = poissonDisc({ width: W, height: H, radius: 2.6, seed });
-  const rng = mulberry32(seed + 11);
+function CompletenessBar({ fraction }: { fraction: number }) {
   return (
-    <svg
-      width={W}
-      height={H}
-      viewBox={`0 0 ${W} ${H}`}
-      className="block"
-      aria-hidden="true"
+    <div
+      aria-hidden
+      className="h-[2px] w-20 bg-[var(--color-border)]"
       role="presentation"
     >
-      {points.map((p, i) => {
-        if (rng() > density * 4) return null; // density is in [0.04, 0.26], scale up to keep ramp visible
-        return (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={0.85}
-            fill="var(--color-text)"
-            opacity={0.65}
-          />
-        );
-      })}
-    </svg>
+      <div
+        className="h-full bg-[var(--color-text)]"
+        style={{ width: `${Math.max(0, Math.min(1, fraction)) * 100}%`, opacity: 0.7 }}
+      />
+    </div>
   );
 }
