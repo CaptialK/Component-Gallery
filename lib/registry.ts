@@ -117,6 +117,46 @@ export const REGISTRY: ComponentEntry[] = [
     firstImpression: "2026-05-02",
     load: () => import("@/components/showcase/empty-states/inbox-zero"),
   },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "metrics-stream",
+    title: "Metrics stream",
+    filename: "metrics-stream.tsx",
+    description:
+      "Stacked observability strips: four KPIs as horizontal rows. Wide Trace polylines with min/max envelopes and dashed target lines; Federal Blue live dot at the latest reading.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    firstImpression: "2026-05-04",
+    load: () => import("@/components/showcase/dashboards/metrics-stream"),
+  },
+  {
+    domain: "saas",
+    category: "forms",
+    slug: "onboarding-accordion",
+    title: "Onboarding accordion",
+    filename: "onboarding-accordion.tsx",
+    description:
+      "Three-step set-up as a vertical accordion. Done above, doing now in the middle, doing-next below — reads as one form-document, not a wizard.",
+    layout: "specimen",
+    firstImpression: "2026-05-04",
+    load: () => import("@/components/showcase/forms/onboarding-accordion"),
+  },
+  {
+    domain: "saas",
+    category: "empty-states",
+    slug: "empty-table-suggestions",
+    title: "Empty table with suggestions",
+    filename: "empty-table-suggestions.tsx",
+    description:
+      "In-place no-results pattern: the table chrome stays, the empty state slots inside, and a 'Try one of these' rail of nearby matches reads as suggestion rows.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    firstImpression: "2026-05-04",
+    load: () => import("@/components/showcase/empty-states/empty-table-suggestions"),
+  },
 
   // ────────────────────────────────────────────────────────────────────
   //  Medical SaaS — clinical-product surfaces
@@ -355,6 +395,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   layouts: "Layouts",
   "empty-states": "Empty states",
   dashboards: "Dashboards",
+  forms: "Forms",
   clinical: "Clinical",
 };
 
