@@ -1,26 +1,26 @@
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
-
 /**
  * Bed board — a single Med-Surg unit, four bays of six beds each. The
  * spatial pattern of occupancy and acuity is the visual signal: a
  * clinician walks the board the way a nurse walks the unit.
  *
- * Dot-language commitments specific to this plate:
+ * Refactored 2026-05-03 per the dot+line system change in DECISIONS.md.
+ * Originally each cell carried a Bridson density backdrop encoding LOS;
+ * Vinson reviewed and reported the dots so close together made the cell
+ * unreadable. Now:
  *
- *  - Each occupied bed cell carries a Bridson stipple whose coverage
- *    encodes length-of-stay. Same primitive, same canon range as every
- *    other density-as-quantity surface. Day 1 reads as floor (~3%); day
- *    7+ approaches the ceiling. The eye reads "this patient has been
- *    here a while" before reading any number.
- *  - Isolation precautions render as a *perimeter* stipple — a one-px
- *    inset of dots around the cell edge. The cell interior stays flat
- *    (chrome rule). Yellow for droplet, persimmon for contact.
- *  - Empty / clean / dirty states are distinct cell vocabularies,
- *    none colour-only: empty has a registration crosshair in the
- *    centre, clean has a single Federal Blue check-dot, dirty has a
- *    persimmon warning trio.
- *  - Acuity dot in the corner mirrors the triage-queue ESI vocabulary
- *    so the cross-plate language reads as one system.
+ *  - Length-of-stay renders as a thin horizontal *line* at the top of each
+ *    occupied cell. Bar length scales with hours; the eye reads "long stay"
+ *    by length, not by texture. Cell interior stays flat.
+ *  - Acuity is a *single sized dot* in the corner. Radius² scales with
+ *    inverse ESI (ESI 1 = biggest, ESI 5 = smallest). Same area-as-data
+ *    encoding as `dashboards/activity-heatmap` — perceptually higher rank
+ *    than density (Cleveland-McGill).
+ *  - Isolation precautions stay as a *perimeter* stipple — a one-px inset
+ *    of dots around the cell edge. The dots aren't behind text; they're
+ *    decorative marks at the cell boundary. Cell interior stays flat.
+ *  - Empty / clean / dirty states are distinct cell vocabularies, none
+ *    colour-only: clean has a Federal Blue check, dirty a persimmon trio,
+ *    blocked a dashed-circle crosshair.
  *
  * Pure server component. Mock census; no PHI.
  */
@@ -133,9 +133,10 @@ export default function BedBoard() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Cell density encodes length-of-stay; perimeter stipples flag
-          isolation. Empty cells distinguish clean, dirty, and blocked by
-          shape, not by colour alone.
+          The bar at each cell's top edge encodes length-of-stay; perimeter
+          stipples flag isolation; the corner dot's size encodes acuity.
+          Empty cells distinguish clean, dirty, and blocked by shape, not
+          colour alone.
         </p>
       </div>
     </div>
@@ -202,15 +203,15 @@ function OccupiedCell({
   state: Extract<BedState, { kind: "occupied" }>;
 }) {
   return (
-    <div className="relative h-full min-h-[88px] overflow-hidden bg-[var(--color-bg)]">
-      {/* LOS density backdrop. Coverage scales with hours-of-stay. */}
-      <LosBackdrop hours={state.losHours} seed={id.charCodeAt(2) * 31 + id.charCodeAt(4)} />
+    <div className="relative h-full min-h-[88px] overflow-hidden bg-[var(--color-surface)]">
+      {/* LOS bar — top edge of cell, length scales with hours. */}
+      <LosBar hours={state.losHours} />
 
       {/* Isolation perimeter, if present. */}
       {state.isolation && <IsolationPerimeter kind={state.isolation} />}
 
       {/* Foreground */}
-      <div className="relative flex h-full flex-col p-2">
+      <div className="relative flex h-full flex-col p-2 pt-2.5">
         <div className="flex items-baseline justify-between">
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text)]">
             {id}
@@ -236,39 +237,30 @@ function OccupiedCell({
   );
 }
 
-/** LOS backdrop — Bridson stipple whose density scales with hours-of-stay.
- *  0–8h ≈ floor; 7+ days ≈ ceiling. Canon-bounded. */
-function LosBackdrop({ hours, seed }: { hours: number; seed: number }) {
-  // Map 0–168h (one week) to keep_prob 0.14–0.92 (≈3% → ≈22% coverage).
-  const norm = Math.min(1, hours / 168);
-  const keep = 0.14 + norm * 0.78;
-  const W = 100;
-  const H = 80;
-  const points = poissonDisc({ width: W, height: H, radius: 4.2, seed });
-  const rng = mulberry32(seed + 1);
+/**
+ * LOS bar — thin horizontal line at the top edge of the cell. Length scales
+ * with hours of stay (0–168h = full bar at one week). Color tracks tier:
+ * faint border for short stays, walnut mid, persimmon for long-stay alerts.
+ * Replaced a Bridson density backdrop (DECISIONS.md 2026-05-03 retrospective).
+ */
+function LosBar({ hours }: { hours: number }) {
+  const fraction = Math.min(1, hours / 168);
+  const color =
+    hours >= 96
+      ? "var(--color-accent)"
+      : hours >= 24
+        ? "var(--color-text)"
+        : "var(--color-border-strong)";
   return (
-    <svg
-      width={W}
-      height={H}
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="absolute inset-0 h-full w-full"
-      aria-hidden="true"
+    <div
+      aria-hidden
+      className="absolute left-0 right-0 top-0 h-[2px] bg-[var(--color-border)]"
     >
-      {points.map((p, i) => {
-        if (rng() > keep) return null;
-        return (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={0.95}
-            fill="var(--color-text)"
-            opacity={0.32}
-          />
-        );
-      })}
-    </svg>
+      <div
+        className="h-full"
+        style={{ width: `${fraction * 100}%`, background: color }}
+      />
+    </div>
   );
 }
 
@@ -331,21 +323,28 @@ function IsolationPerimeter({
   );
 }
 
-/** Acuity dot — coverage encodes ESI 1–5 (matches triage-queue vocabulary). */
+/**
+ * Acuity dot — single sized dot. Radius² scales with inverse ESI (ESI 1 =
+ * biggest, ESI 5 = smallest). Same area-as-data encoding as the activity
+ * heatmap; replaces a density-cluster encoding (DECISIONS.md 2026-05-03).
+ */
 function AcuityDot({ esi }: { esi: 1 | 2 | 3 | 4 | 5 }) {
   const cell = 14;
-  const ESI_DENSITY: Record<number, number> = {
-    1: 0.95, 2: 0.78, 3: 0.55, 4: 0.32, 5: 0.18,
-  };
+  // Inverse: ESI 1 (sickest) → 1.0, ESI 5 (lowest acuity) → 0.0.
+  const norm = (5 - esi) / 4;
+  // Radius range chosen so smallest dot is still visible, largest fits the cell.
+  const minR = 1.4;
+  const maxR = 4.2;
+  const r = Math.sqrt(minR * minR + (maxR * maxR - minR * minR) * norm);
   const ink = esi <= 2 ? "var(--color-accent-2)" : "var(--color-text)";
-  const points = poissonDisc({ width: cell, height: cell, radius: 2.3, seed: esi * 17 + 4 });
-  const rng = mulberry32(esi * 91 + 4);
-  const dots = points.filter(() => rng() < ESI_DENSITY[esi]);
   return (
-    <svg width={cell} height={cell} viewBox={`0 0 ${cell} ${cell}`} aria-label={`ESI ${esi}`}>
-      {dots.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={0.75} fill={ink} />
-      ))}
+    <svg
+      width={cell}
+      height={cell}
+      viewBox={`0 0 ${cell} ${cell}`}
+      aria-label={`ESI ${esi}`}
+    >
+      <circle cx={cell / 2} cy={cell / 2} r={r} fill={ink} />
     </svg>
   );
 }
