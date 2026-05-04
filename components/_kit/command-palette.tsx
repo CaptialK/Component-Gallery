@@ -12,7 +12,13 @@ import { useRouter } from "next/navigation";
 import { Combobox } from "@base-ui-components/react/combobox";
 import { Dialog } from "@base-ui-components/react/dialog";
 import { ArrowRight, Clock, Search } from "lucide-react";
-import { REGISTRY, type ComponentEntry } from "@/lib/registry";
+import {
+  REGISTRY,
+  getCategoryLabel,
+  getDomainLabel,
+  type ComponentEntry,
+  type Domain,
+} from "@/lib/registry";
 
 const RECENT_KEY = "cg:recent";
 const MAX_RECENT = 5;
@@ -55,22 +61,25 @@ function saveRecent(href: string) {
 
 type Item = {
   href: string;
+  domain: Domain;
   category: string;
   slug: string;
   title: string;
   filename: string;
-  // The label string Base UI uses for filtering/display.
+  // The label string Base UI uses for filtering/display. Includes the domain
+  // label so a query like "medical" surfaces the whole clinical batch.
   label: string;
 };
 
 function entryToItem(e: ComponentEntry): Item {
   return {
     href: `/c/${e.category}/${e.slug}`,
+    domain: e.domain,
     category: e.category,
     slug: e.slug,
     title: e.title,
     filename: e.filename,
-    label: `${e.title} ${e.category} ${e.filename}`,
+    label: `${e.title} ${e.category} ${e.filename} ${getDomainLabel(e.domain)}`,
   };
 }
 
@@ -125,16 +134,24 @@ function CommandPalette({
     const recent = recentHrefs
       .map((h) => allItems.find((i) => i.href === h))
       .filter((i): i is Item => Boolean(i));
-    const byCategory = new Map<string, Item[]>();
+    // Group by combined "Domain · Category" so the palette mirrors the
+    // home-page taxonomy and Layouts entries from different domains don't
+    // collide under one heading.
+    const domainPrefix: Record<Domain, string> = {
+      saas: "SaaS",
+      medical: "Medical",
+    };
+    const byDomainCategory = new Map<string, Item[]>();
     for (const it of allItems) {
-      const arr = byCategory.get(it.category) ?? [];
+      const key = `${domainPrefix[it.domain]} · ${getCategoryLabel(it.category)}`;
+      const arr = byDomainCategory.get(key) ?? [];
       arr.push(it);
-      byCategory.set(it.category, arr);
+      byDomainCategory.set(key, arr);
     }
     const out: Group[] = [];
     if (recent.length) out.push({ value: "Recent", items: recent });
-    for (const [cat, items] of byCategory) {
-      out.push({ value: cat, items });
+    for (const [label, items] of byDomainCategory) {
+      out.push({ value: label, items });
     }
     return out;
   }, [allItems, recentHrefs]);
