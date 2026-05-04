@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, X } from "lucide-react";
 import { DotField } from "@/components/_kit/dot-field";
 import { RegistrationCrosshair } from "@/components/_kit/registration-crosshair";
-import { getCategoryLabel } from "@/lib/registry";
+import { formatFirstImpression, getCategoryLabel } from "@/lib/registry";
 import { cn } from "@/lib/cn";
 
 /**
@@ -36,6 +36,7 @@ type EntryShape = {
 export function SpecimenShell({
   entry,
   plateNumber,
+  firstImpression,
   source,
   aspectRatio = "5 / 6",
   maxWidth = 600,
@@ -43,6 +44,7 @@ export function SpecimenShell({
 }: {
   entry: EntryShape;
   plateNumber: string;
+  firstImpression: string;
   source: React.ReactNode;
   aspectRatio?: string;
   maxWidth?: number;
@@ -144,6 +146,7 @@ export function SpecimenShell({
         {/* Colophon sits below the bottom fade with explicit breath. */}
         <div className="mt-12 w-full" style={widthStyle}>
           <Colophon
+            firstImpression={firstImpression}
             sourceOpen={sourceOpen}
             panelId={panelId}
             onToggle={() => setSourceOpen((o) => !o)}
@@ -245,14 +248,19 @@ function FadeBand({
 
 /**
  * Foot-of-page colophon — typeset book caption beneath the plate. The
- * `· read the plate ·` button is the source-reveal trigger; styled inline
- * to read as part of the colophon prose, not as a separate UI element.
+ * `firstImpression` date is per-plate (the date the plate was first
+ * pressed) — it dates this individual specimen, not the catalogue at
+ * large. The `· read the plate ·` button is the source-reveal trigger;
+ * styled inline to read as part of the colophon prose, not as a separate
+ * UI element.
  */
 function Colophon({
+  firstImpression,
   sourceOpen,
   panelId,
   onToggle,
 }: {
+  firstImpression: string;
   sourceOpen: boolean;
   panelId: string;
   onToggle: () => void;
@@ -263,7 +271,11 @@ function Colophon({
       style={{ fontVariationSettings: '"opsz" 18, "SOFT" 30' }}
     >
       Set in Fraunces 96/96 SOFT 30, Geist Sans 14/21, Geist Mono 13/19.
-      Composed in TypeScript 6. Pressed onto Tailwind v4. First impression May 2026.{" "}
+      Composed in TypeScript 6. Pressed onto Tailwind v4. First impression{" "}
+      <time dateTime={firstImpression} className="not-italic">
+        {formatFirstImpression(firstImpression)}
+      </time>
+      .{" "}
       <button
         type="button"
         onClick={onToggle}

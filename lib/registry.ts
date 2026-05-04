@@ -17,6 +17,12 @@ export type ComponentEntry = {
   description?: string;
   status?: "wip";
   /**
+   * The date the plate was first pressed — when its source file was first
+   * committed. ISO "YYYY-MM-DD" UTC. Rendered in the specimen colophon in
+   * Fraunces italic ("First impression May 2nd, 2026.").
+   */
+  firstImpression: string;
+  /**
    * Page treatment. `default` (or omitted) gets the standard registry-style
    * shell (header bar, Preview/Source toggle). `specimen` gets the Spike 2
    * Specimen Cabinet treatment — registration crosshairs, plate number,
@@ -70,6 +76,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-02",
     load: () => import("@/components/showcase/layouts/app-shell"),
   },
   {
@@ -81,6 +88,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "A centered card with email, password, and continue-with-GitHub.",
     layout: "specimen",
+    firstImpression: "2026-05-02",
     load: () => import("@/components/showcase/auth/centered-signin"),
   },
   {
@@ -94,6 +102,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "4 / 3",
     maxWidth: 880,
+    firstImpression: "2026-05-02",
     load: () => import("@/components/showcase/dashboards/activity-heatmap"),
   },
   {
@@ -105,6 +114,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Pointillism illustration, paired with a clear primary action.",
     layout: "specimen",
+    firstImpression: "2026-05-02",
     load: () => import("@/components/showcase/empty-states/inbox-zero"),
   },
 
@@ -122,6 +132,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/layouts/chart-header"),
   },
   {
@@ -135,6 +146,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "9 / 16",
     maxWidth: 320,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/layouts/care-team-rail"),
   },
   {
@@ -148,6 +160,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/layouts/bed-board"),
   },
   {
@@ -161,6 +174,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/dashboards/vitals-monitor"),
   },
   {
@@ -174,6 +188,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/dashboards/triage-queue"),
   },
   {
@@ -185,6 +200,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Active meds with a 24-hour scheduled-dose strip per row. One dot per dose; given · upcoming · overdue · suspended each get a distinct dot vocabulary.",
     layout: "specimen",
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/medication-list"),
   },
   {
@@ -196,6 +212,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "CMP + CBC with each value placed on a reference-range line. Federal Blue marker in-range, persimmon out; H/L margin letters carry the analytical readout.",
     layout: "specimen",
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/lab-results"),
   },
   {
@@ -207,6 +224,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Subjective / Objective / Assessment / Plan, four panes. Each header carries a length-as-completeness bar — fills with what's drafted.",
     layout: "specimen",
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/intake-soap-note"),
   },
   {
@@ -220,6 +238,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/appointment-week"),
   },
   {
@@ -233,6 +252,7 @@ export const REGISTRY: ComponentEntry[] = [
     layout: "specimen",
     aspectRatio: "16 / 9",
     maxWidth: 880,
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/order-entry"),
   },
   {
@@ -244,6 +264,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Vertical event log for a hospital admission. Hairline thread connects events; flagged events ink in persimmon, the live event wears a Federal Blue ring; an open-ended dot trail signals the encounter is still going.",
     layout: "specimen",
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/encounter-timeline"),
   },
   {
@@ -255,6 +276,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Printable after-visit document. Section breaks render as halftone fade bands; the signature line ends with a Federal Blue ink trail; footer carries a stippled official seal.",
     layout: "specimen",
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/clinical/discharge-summary"),
   },
   {
@@ -266,6 +288,7 @@ export const REGISTRY: ComponentEntry[] = [
     description:
       "Empty-state for a patient with no recent visits. EKG trace rendered entirely from dots, fading from sinus rhythm to flat line.",
     layout: "specimen",
+    firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/empty-states/no-encounters-yet"),
   },
 ];
@@ -357,4 +380,27 @@ export function totals() {
     files: REGISTRY.length,
     folders: new Set(REGISTRY.map((e) => e.category)).size,
   };
+}
+
+/**
+ * Format an ISO date ("2026-05-04") for the colophon — book-voice English
+ * with an ordinal day, e.g. "May 2nd, 2026". Parsed in UTC so timezone
+ * offsets don't shift the date.
+ */
+export function formatFirstImpression(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const date = new Date(Date.UTC(y, m - 1, d));
+  const month = date.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  return `${month} ${ordinalDay(d)}, ${y}`;
+}
+
+function ordinalDay(n: number): string {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  switch (n % 10) {
+    case 1: return `${n}st`;
+    case 2: return `${n}nd`;
+    case 3: return `${n}rd`;
+    default: return `${n}th`;
+  }
 }
