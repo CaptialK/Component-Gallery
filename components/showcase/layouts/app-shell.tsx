@@ -13,7 +13,6 @@ import {
   Plus,
   Search,
   Settings,
-  Sparkles,
   Users,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -33,14 +32,32 @@ const PROJECTS = [
   { name: "field-notes", color: "oklch(58% 0.18 270)" },
 ];
 
-const ROWS = [
+type StatusKey = "In review" | "Drafting" | "Approved" | "Blocked";
+
+const MEMBERS: Record<string, string> = {
+  MR: "Mara Reyes",
+  JT: "Jules Tanaka",
+  AH: "Amir Haddad",
+  RG: "Rosa Garcia",
+};
+
+const ROWS: { id: string; title: string; status: StatusKey; owner: keyof typeof MEMBERS; updated: string }[] = [
   { id: "DOC-9241", title: "Invoicing schema overhaul", status: "In review", owner: "MR", updated: "2h" },
   { id: "DOC-9237", title: "Onboarding email re-sequence", status: "Drafting", owner: "JT", updated: "5h" },
-  { id: "DOC-9230", title: "Q3 retention deep dive", status: "Approved", owner: "AH", updated: "yesterday" },
-  { id: "DOC-9228", title: "Pricing experiment kickoff", status: "Blocked", owner: "MR", updated: "yesterday" },
+  { id: "DOC-9230", title: "Q3 retention deep dive", status: "Approved", owner: "AH", updated: "1d" },
+  { id: "DOC-9228", title: "Pricing experiment kickoff", status: "Blocked", owner: "MR", updated: "1d" },
   { id: "DOC-9201", title: "API rate-limit migration plan", status: "Drafting", owner: "RG", updated: "2d" },
   { id: "DOC-9192", title: "Outage retro: 04-29", status: "Approved", owner: "JT", updated: "3d" },
 ];
+
+/** Status palette — single source of truth for the badge AND the legend strip. */
+const STATUS_INK: Record<StatusKey, string> = {
+  Drafting: "var(--color-text-muted)",
+  "In review": "var(--color-text)",
+  Approved: "color-mix(in oklch, var(--color-success) 70%, var(--color-text))",
+  Blocked: "color-mix(in oklch, var(--color-danger) 70%, var(--color-text))",
+};
+const STATUS_KEYS: StatusKey[] = ["Drafting", "In review", "Approved", "Blocked"];
 
 export default function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
@@ -55,14 +72,25 @@ export default function AppShell() {
         )}
       >
         <div className="flex h-12 items-center gap-2 border-b border-[var(--color-border)] px-3">
-          <div
+          <span
             aria-hidden
-            className="grid h-6 w-6 place-items-center rounded-[var(--radius-xs)] bg-[var(--color-accent)] font-mono text-[11px] font-medium text-[var(--color-accent-fg)]"
+            className="grid h-6 w-6 place-items-center rounded-[var(--radius-xs)] bg-[var(--color-bg)] ring-1 ring-[var(--color-border-strong)]"
           >
-            S
-          </div>
+            <span
+              className="font-display text-[15px] italic leading-none text-[var(--color-text)]"
+              style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+            >
+              S
+            </span>
+          </span>
           {!collapsed && (
-            <span className="font-mono text-[12px] tracking-tight">stipple.lab</span>
+            <span
+              className="font-display text-[14px] italic leading-none text-[var(--color-text)]"
+              style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+            >
+              stipple
+              <span className="text-[var(--color-text-muted)]">.lab</span>
+            </span>
           )}
           <button
             type="button"
@@ -193,8 +221,8 @@ export default function AppShell() {
               />
             </button>
             <span
-              aria-hidden
-              className="grid h-7 w-7 place-items-center rounded-full bg-[var(--color-accent)] font-mono text-[10px] text-[var(--color-accent-fg)]"
+              title={MEMBERS.MR}
+              className="grid h-7 w-7 place-items-center rounded-full bg-[var(--color-bg)] font-mono text-[10px] text-[var(--color-text)] ring-1 ring-[var(--color-border)]"
             >
               MR
             </span>
@@ -204,19 +232,22 @@ export default function AppShell() {
         {/* Content */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex items-end justify-between gap-4 border-b border-[var(--color-border)] px-6 pt-6 pb-4">
-            <div>
-              <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--color-text-muted)]">
-                <Sparkles size={11} strokeWidth={1.6} />
-                <span>Recently active</span>
+            <div className="min-w-0">
+              <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+                Recently active
               </div>
-              <h1 className="mt-1 text-xl font-medium tracking-[-0.02em]">
+              <h1
+                className="mt-1 font-display text-[22px] leading-none tracking-[-0.02em] text-[var(--color-text)]"
+                style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
+              >
                 Documents
               </h1>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
                 Files updated in the last 14 days across your projects.
               </p>
+              <StatusLegend />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
                 className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)] hover:border-[var(--color-border-strong)]"
@@ -259,9 +290,13 @@ export default function AppShell() {
                   {ROWS.map((r) => (
                     <tr
                       key={r.id}
-                      className="border-b border-[var(--color-border)] hover:bg-[var(--color-surface-2)]"
+                      className="group relative border-b border-[var(--color-border)] hover:bg-[var(--color-surface)]"
                     >
-                      <td className="px-6 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)]">
+                      <td className="relative px-6 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)]">
+                        <span
+                          aria-hidden
+                          className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent-2)] opacity-0 group-hover:opacity-100"
+                        />
                         {r.id}
                       </td>
                       <td className="px-6 py-2.5">
@@ -273,7 +308,10 @@ export default function AppShell() {
                         <StatusBadge status={r.status} />
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className="grid h-5 w-5 place-items-center rounded-full bg-[var(--color-surface-2)] font-mono text-[10px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+                        <span
+                          title={MEMBERS[r.owner]}
+                          className="grid h-5 w-5 place-items-center rounded-full bg-[var(--color-bg)] font-mono text-[10px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]"
+                        >
                           {r.owner}
                         </span>
                       </td>
@@ -301,14 +339,14 @@ export default function AppShell() {
                   ["RG", "linked API rate-limit RFC", "08:55"],
                 ].map(([who, what, when], i) => (
                   <li key={i} className="flex gap-3">
-                    <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--color-surface-2)] font-mono text-[10px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+                    <span
+                      title={MEMBERS[who]}
+                      className="grid h-5 w-5 shrink-0 place-items-center rounded-full bg-[var(--color-bg)] font-mono text-[10px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]"
+                    >
                       {who}
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="text-[var(--color-text)]">
-                        <span className="text-[var(--color-text-muted)]">{who} </span>
-                        {what}
-                      </div>
+                      <div className="text-[var(--color-text)]">{what}</div>
                       <div className="font-mono text-[10px] text-[var(--color-text-muted)]">
                         {when}
                       </div>
@@ -324,37 +362,41 @@ export default function AppShell() {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { color: string; bg: string; ring: string }> = {
-    "In review": {
-      color: "var(--color-text)",
-      bg: "var(--color-surface-2)",
-      ring: "var(--color-border)",
-    },
-    Drafting: {
-      color: "var(--color-text-muted)",
-      bg: "var(--color-surface-2)",
-      ring: "var(--color-border)",
-    },
-    Approved: {
-      color: "color-mix(in oklch, var(--color-success) 70%, var(--color-text))",
-      bg: "color-mix(in oklch, var(--color-success) 12%, var(--color-bg))",
-      ring: "color-mix(in oklch, var(--color-success) 30%, var(--color-border))",
-    },
-    Blocked: {
-      color: "color-mix(in oklch, var(--color-danger) 70%, var(--color-text))",
-      bg: "color-mix(in oklch, var(--color-danger) 12%, var(--color-bg))",
-      ring: "color-mix(in oklch, var(--color-danger) 30%, var(--color-border))",
-    },
-  };
-  const t = map[status] ?? map.Drafting;
+function StatusBadge({ status }: { status: StatusKey }) {
+  const ink = STATUS_INK[status];
   return (
     <span
-      className="inline-flex h-5 items-center gap-1.5 rounded-[var(--radius-xs)] px-1.5 font-mono text-[10px] uppercase tracking-[0.06em] ring-1"
-      style={{ color: t.color, background: t.bg, boxShadow: `inset 0 0 0 1px ${t.ring}` }}
+      className="inline-flex h-5 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 font-mono text-[10px] uppercase tracking-[0.06em]"
+      style={{ color: ink }}
     >
-      <span aria-hidden className="h-1 w-1 rounded-full" style={{ background: t.color }} />
+      <span aria-hidden className="h-1 w-1 rounded-full" style={{ background: ink }} />
       {status}
     </span>
+  );
+}
+
+/**
+ * Legend for the status palette. The single source of truth for colour →
+ * meaning so a reader doesn't have to infer "what does the green dot mean."
+ */
+function StatusLegend() {
+  return (
+    <div
+      role="list"
+      aria-label="Status key"
+      className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]"
+    >
+      <span aria-hidden>Status key</span>
+      {STATUS_KEYS.map((s) => (
+        <span key={s} role="listitem" className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          <span
+            aria-hidden
+            className="h-1 w-1 rounded-full"
+            style={{ background: STATUS_INK[s] }}
+          />
+          {s}
+        </span>
+      ))}
+    </div>
   );
 }
