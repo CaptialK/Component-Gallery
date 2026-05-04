@@ -1,23 +1,24 @@
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
-import { DotField } from "@/components/_kit/dot-field";
+import { mulberry32 } from "@/components/_kit/dot-noise";
+import { Trace, type TraceDot } from "@/components/_kit/trace";
 
 /**
  * Vitals monitor — bedside dashboard showing the five core physiological
  * measurements (HR, BP, SpO₂, RR, Temp) with their last-60-minute trend.
  *
- * Dot-language commitments specific to this plate:
+ * Refactored 2026-05-03 per the dot+line system change in DECISIONS.md
+ * (the dots-as-background retrospective). Originally the trend was rendered
+ * as 60 stippled samples on a Bridson density backdrop — Vinson reviewed and
+ * reported the density behind the dots was illegible at typical scales.
  *
- *  - Each trend is rendered as 60 dots, one per minute. The normal-range
- *    envelope is a Bridson density backdrop — denser inside the band,
- *    fading at the edges — so the eye reads "in or out of range" before it
- *    reads any number.
- *  - In-range samples are walnut ink. Out-of-range samples are persimmon.
- *    The most recent sample wears a Federal Blue ring (the same vocabulary
- *    as a focus halo — "this is the live one").
- *  - The unit, normal range, and current value share a single typographic
- *    register; alerts are *not* colored badges. They're a stippled rule
- *    under the value, density-coded to severity (Bertin: position over
- *    color for ordinal data).
+ * Now:
+ *  - The trend is a smooth `<Trace />` polyline. Walnut ink for the line.
+ *  - The normal envelope is a translucent fill band between the bound
+ *    threshold rules (dashed hairlines at `normal[0]` and `normal[1]`).
+ *  - Dots only mark *moments* — out-of-range samples (persimmon) and the
+ *    live read (Federal Blue, slightly larger). Cleveland-McGill: lines for
+ *    trend, dots for marks; the encoding match the perceptual ranking.
+ *  - Severity under each value is a thin colored hairline; the previous
+ *    density-coded stippled rule was a dots-behind-information violation.
  *
  * Pure server component. Realistic but mock data; no PHI.
  */
@@ -30,14 +31,14 @@ type Metric = {
   unit: string;
   /** Realistic range used for vertical scaling of the trend. */
   scale: [number, number];
-  /** Clinical normal band shown as a density envelope. */
+  /** Clinical normal band, rendered as the envelope fill + thresholds. */
   normal: [number, number];
   /** Current displayed value, formatted by `format`. */
   current: number | { sys: number; dia: number };
   format: (v: number | { sys: number; dia: number }) => string;
   /** 60 samples — most recent last. */
   trend: number[];
-  /** Severity drives the stippled severity rule under the value. */
+  /** Severity drives the thin alert rule under the value. */
   severity: Severity;
 };
 
@@ -51,7 +52,6 @@ function trendAround(baseline: number, drift: number, noise: number, seed: numbe
   const out: number[] = [];
   let v = baseline;
   for (let i = 0; i < 60; i++) {
-    // Slow random walk + per-sample noise.
     v += (rng() - 0.5) * drift;
     out.push(v + (rng() - 0.5) * noise);
   }
@@ -81,7 +81,6 @@ const METRICS: Metric[] = [
       const x = v as { sys: number; dia: number };
       return `${x.sys}/${x.dia}`;
     },
-    // BP trend = systolic only for the sparkline. Diastolic shown in the value.
     trend: trendAround(124, 1.6, 4, 22),
     severity: "normal",
   },
@@ -120,6 +119,12 @@ const METRICS: Metric[] = [
   },
 ];
 
+const SEVERITY_COLOR: Record<Severity, string> = {
+  normal: "var(--color-border-strong)",
+  marginal: "var(--color-warning)",
+  alert: "var(--color-danger)",
+};
+
 export default function VitalsMonitor() {
   return (
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -152,7 +157,7 @@ export default function VitalsMonitor() {
           ))}
         </div>
 
-        {/* Foot caption — the system's tell. */}
+        {/* Foot caption — the system's tell, updated for the line vocabulary. */}
         <p
           className="border-t border-[var(--color-border)] bg-[var(--color-bg)] px-6 py-2 text-center text-[11px] italic leading-relaxed text-[var(--color-text-muted)]"
           style={{
@@ -160,9 +165,9 @@ export default function VitalsMonitor() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Each dot is a one-minute sample. Walnut dots sit inside the patient's
-          normal envelope; persimmon dots fall outside. The Federal Blue ring
-          marks the live read.
+          Each line is sixty minutes of trend. The faint band marks the
+          patient's normal envelope; persimmon dots mark out-of-range moments.
+          The Federal Blue dot is the live read.
         </p>
       </div>
     </div>
@@ -170,15 +175,6 @@ export default function VitalsMonitor() {
 }
 
 function MetricCard({ metric }: { metric: Metric }) {
-  const sparkW = 148;
-  const sparkH = 52;
-  // Coverage stays inside the locked print-canon range [0.03, 0.22]: at
-  // these baseDensity values the severity rule renders ~4% (normal) → ~9%
-  // (alert), so the gradient is visible but the rule never disappears.
-  const sevDensity = metric.severity === "alert" ? 0.95 : metric.severity === "marginal" ? 0.6 : 0.4;
-  const sevAccent =
-    metric.severity === "alert" ? 0.6 : metric.severity === "marginal" ? 0.3 : 0;
-
   return (
     <div className="flex min-w-0 flex-col gap-3 px-4 py-4">
       <div className="flex items-baseline justify-between">
@@ -208,46 +204,31 @@ function MetricCard({ metric }: { metric: Metric }) {
         </span>
       </div>
 
-      {/* Severity rule — density-coded, not colour-coded. */}
-      <div className="h-2 w-full">
-        <DotField
-          shape={{ kind: "rect", width: 160, height: 8 }}
-          spacing={3.4}
-          dotRadius={0.85}
-          baseDensity={sevDensity}
-          accentRatio={sevAccent}
-          seed={metric.key.length * 17 + 3}
-          density={(x, _y, w) => {
-            // Crescendo from the start so the eye reads it left-to-right
-            // like a sentence-ending punctuation.
-            const t = x / w;
-            return Math.min(1, t * 1.4);
-          }}
-          className="h-full w-full"
-        />
-      </div>
+      {/* Severity rule — single colored hairline. Length is a future encoding;
+          for now color alone carries severity (mirrors the colored mono labels
+          on chart-header's allergy ribbon). */}
+      <div
+        aria-hidden
+        className="h-[2px] w-full rounded-[1px]"
+        style={{ background: SEVERITY_COLOR[metric.severity] }}
+      />
 
       <Sparkline
-        width={sparkW}
-        height={sparkH}
+        width={148}
+        height={52}
         scale={metric.scale}
         normal={metric.normal}
         samples={metric.trend}
-        seed={metric.key.charCodeAt(0) * 211 + metric.key.charCodeAt(1)}
       />
     </div>
   );
 }
 
 /**
- * Sparkline — 60 dots over 60 minutes, vertically positioned by value.
- *
- * Layered:
- *   1. Bridson density backdrop bounded to the *normal envelope* (the band
- *      between `normal[0]` and `normal[1]`). The eye locks onto this band
- *      first.
- *   2. Sample dots — walnut if inside normal, persimmon if outside.
- *   3. Live ring around the most recent sample (Federal Blue stipple).
+ * Sparkline — a smooth Trace polyline through 60 minutes of samples, with the
+ * normal envelope as a translucent fill band, dashed threshold rules at the
+ * envelope edges, persimmon dots at out-of-range moments, and a Federal Blue
+ * dot at the live read.
  */
 function Sparkline({
   width,
@@ -255,115 +236,66 @@ function Sparkline({
   scale,
   normal,
   samples,
-  seed,
 }: {
   width: number;
   height: number;
   scale: [number, number];
   normal: [number, number];
   samples: number[];
-  seed: number;
 }) {
-  const [lo, hi] = scale;
-  const span = hi - lo;
-  const yOf = (v: number) => {
-    const t = (v - lo) / span;
-    return height - clamp(t, 0, 1) * height;
-  };
-  const yNormalTop = yOf(normal[1]);
-  const yNormalBot = yOf(normal[0]);
-  const bandH = Math.max(2, yNormalBot - yNormalTop);
-
-  const last = samples[samples.length - 1];
   const lastIdx = samples.length - 1;
-  const xOf = (i: number) => (i / (samples.length - 1)) * (width - 6) + 3;
+  const last = samples[lastIdx];
+  const data = samples.map((y, i) => ({ x: i, y }));
+
+  const outOfRangeMarks: TraceDot[] = [];
+  for (let i = 0; i < samples.length; i++) {
+    if (i === lastIdx) continue;
+    const v = samples[i];
+    if (v < normal[0] || v > normal[1]) {
+      outOfRangeMarks.push({
+        index: i,
+        color: "var(--color-accent)",
+        radius: 1.3,
+      });
+    }
+  }
 
   return (
-    <svg
-      role="img"
-      aria-label={`60-minute trend, current ${last.toFixed(1)}`}
-      viewBox={`0 0 ${width} ${height}`}
+    <Trace
+      data={data}
+      width={width}
+      height={height}
+      yDomain={scale}
+      smooth
+      strokeColor="var(--color-text)"
+      strokeWidth={1.2}
+      fill={{
+        kind: "envelope",
+        lower: normal[0],
+        upper: normal[1],
+        color: "color-mix(in oklch, var(--color-text-muted) 8%, transparent)",
+      }}
+      thresholds={[
+        {
+          y: normal[0],
+          dashed: true,
+          strokeWidth: 0.5,
+          color: "var(--color-border-strong)",
+        },
+        {
+          y: normal[1],
+          dashed: true,
+          strokeWidth: 0.5,
+          color: "var(--color-border-strong)",
+        },
+      ]}
+      dots={[
+        ...outOfRangeMarks,
+        { index: lastIdx, color: "var(--color-accent-2)", radius: 2.2 },
+      ]}
+      ariaLabel={`60-minute trend, current ${last.toFixed(1)}`}
       className="block w-full"
-    >
-      {/* Backdrop: blue-noise dots inside the normal envelope, density
-          tapering at the band edges. Inline circles (not <DotField/>) so the
-          backdrop shares the parent SVG's coordinate space. */}
-      {(() => {
-        const bandHRound = Math.max(1, Math.round(bandH));
-        const points = poissonDisc({ width, height: bandHRound, radius: 4, seed });
-        const rng = mulberry32(seed + 1);
-        return points.map((p, i) => {
-          // Crest at vertical centre of band, fade to edges.
-          const t = (p.y - bandHRound / 2) / (bandHRound / 2);
-          const keep = Math.max(0, 1 - t * t);
-          if (rng() > keep * 0.55) return null;
-          return (
-            <circle
-              key={`bg-${i}`}
-              cx={p.x}
-              cy={yNormalTop + p.y}
-              r={0.7}
-              fill="var(--color-text)"
-              opacity={0.35}
-            />
-          );
-        });
-      })()}
-
-      {/* Hairline at the top and bottom of the normal band — quiet. */}
-      <line
-        x1={0}
-        x2={width}
-        y1={yNormalTop}
-        y2={yNormalTop}
-        stroke="var(--color-border-strong)"
-        strokeWidth="0.4"
-        strokeDasharray="1 2"
-      />
-      <line
-        x1={0}
-        x2={width}
-        y1={yNormalBot}
-        y2={yNormalBot}
-        stroke="var(--color-border-strong)"
-        strokeWidth="0.4"
-        strokeDasharray="1 2"
-      />
-
-      {/* Sample dots. */}
-      {samples.map((v, i) => {
-        const inRange = v >= normal[0] && v <= normal[1];
-        const isLast = i === lastIdx;
-        return (
-          <circle
-            key={i}
-            cx={xOf(i)}
-            cy={yOf(v)}
-            r={isLast ? 1.6 : 1.2}
-            fill={inRange ? "var(--color-text)" : "var(--color-accent)"}
-            opacity={isLast ? 1 : 0.78}
-          />
-        );
-      })}
-
-      {/* Live ring around the most recent sample. Federal Blue,
-          stippled — same vocabulary as a focus halo. */}
-      <g transform={`translate(${xOf(lastIdx)} ${yOf(last)})`}>
-        <RingDots radius={4} dots={10} />
-      </g>
-    </svg>
+      margin={3}
+    />
   );
-}
-
-function RingDots({ radius, dots }: { radius: number; dots: number }) {
-  const out: React.ReactElement[] = [];
-  for (let i = 0; i < dots; i++) {
-    const a = (i / dots) * Math.PI * 2;
-    const x = Math.cos(a) * radius;
-    const y = Math.sin(a) * radius;
-    out.push(
-      <circle key={i} cx={x} cy={y} r={0.55} fill="var(--color-accent-2)" />,
-    );
-  }
-  return <>{out}</>;
 }
