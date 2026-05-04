@@ -10,9 +10,11 @@ import { DotField } from "@/components/_kit/dot-field";
  *  - The avatar is a Bridson stipple of the patient's monogram; not a photo,
  *    not an icon. "This is who the chart is about" rendered in the same
  *    primitive as the rest of the system.
- *  - The allergy ribbon uses density-as-severity. NKDA reads as a sparse
- *    walnut field; a real allergen list reads as denser persimmon. Severity
- *    isn't a coloured tag — it's literal coverage.
+ *  - The allergy ribbon used to be a density-as-severity Bridson field
+ *    *behind* the allergy list. Vinson reviewed and reported the text was
+ *    hard to read over the dot field. Refactored to use *line length* as the
+ *    severity encoding — a small bar in the foreground next to the label —
+ *    per the dot+line system change in DECISIONS.md (2026-05-03 retrospective).
  *  - Code status sits in a quiet stippled rule beneath the headline so the
  *    most consequential clinical fact has its own typographic register.
  *
@@ -196,53 +198,49 @@ function DotRule({ width, side }: { width: number; side: "left" | "right" }) {
 }
 
 /**
- * Allergy ribbon. The dot field's *density* maps to allergy burden:
- *   - severe   → 0.95
- *   - moderate → 0.55
- *   - mild     → 0.25
- *   - NKDA     → 0.04 (a near-empty field — present, but signalling absence)
+ * Allergy ribbon. Burden as line length, not background density. The text is
+ * the foreground; the bar is a small quantitative companion next to the label.
  *
- * Coverage is bounded to the locked print-canon range. Persimmon-tinted dots
- * for severe allergens; walnut for moderate; sparse-walnut for mild and NKDA.
+ * Burden formula: severe=1, moderate=0.5, mild=0.2; normalized against an
+ * arbitrary ceiling of 3 ("3+ severe-equivalent" reads as full bar).
+ *
+ * Indicator color tracks the worst allergen present — danger if any severe,
+ * warning if any moderate, muted otherwise. NKDA shows a faint full-track
+ * outline with no fill, matching the italic "NKDA" label.
  */
 function AllergyRibbon({ allergies }: { allergies: Allergen[] }) {
-  const burden =
-    allergies.reduce(
-      (s, a) =>
-        s + (a.severity === "severe" ? 1 : a.severity === "moderate" ? 0.5 : 0.2),
-      0,
-    ) || 0.04;
-  // Map burden to density inside [0.06, 0.85] — the visual range we want to
-  // walk between "you basically don't have to think about this" and "stop
-  // and read this."
-  const density = Math.min(0.85, Math.max(0.06, burden * 0.35));
-  const accentRatio = allergies.some((a) => a.severity === "severe")
-    ? 0.6
-    : allergies.some((a) => a.severity === "moderate")
-      ? 0.25
-      : 0.05;
+  const rawBurden = allergies.reduce(
+    (s, a) =>
+      s + (a.severity === "severe" ? 1 : a.severity === "moderate" ? 0.5 : 0.2),
+    0,
+  );
+  const burden = Math.min(1, rawBurden / 3);
+  const hasSevere = allergies.some((a) => a.severity === "severe");
+  const hasModerate = allergies.some((a) => a.severity === "moderate");
+  const indicatorColor = hasSevere
+    ? "var(--color-danger)"
+    : hasModerate
+      ? "var(--color-warning)"
+      : "var(--color-border-strong)";
 
   return (
-    <div className="relative border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-      {/* Density field — full-bleed across the ribbon. Persimmon-leaning. */}
-      <div className="absolute inset-0 opacity-90">
-        <DotField
-          shape={{ kind: "rect", width: 880, height: 48 }}
-          spacing={4.2}
-          dotRadius={1}
-          baseDensity={density}
-          accentRatio={accentRatio}
-          seed={2049}
-          className="h-full w-full"
-        />
-      </div>
-
-      <div className="relative flex items-center gap-3 px-6 py-2.5">
+    <div className="border-b border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-2.5">
+      <div className="flex items-center gap-3 text-[12px]">
         <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
           Allergies
         </span>
+        {/* Severity bar — burden as line length. */}
+        <span
+          aria-hidden
+          className="relative inline-block h-[2px] w-12 overflow-hidden rounded-[1px] bg-[var(--color-border)]"
+        >
+          <span
+            className="absolute inset-y-0 left-0 rounded-[1px]"
+            style={{ width: `${burden * 100}%`, background: indicatorColor }}
+          />
+        </span>
         <span aria-hidden className="h-3 w-px bg-[var(--color-border-strong)]" />
-        <ul className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[12px]">
+        <ul className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
           {allergies.length === 0 ? (
             <li className="italic text-[var(--color-text-muted)]">NKDA</li>
           ) : (
