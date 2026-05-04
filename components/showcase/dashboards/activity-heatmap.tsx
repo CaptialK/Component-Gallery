@@ -121,8 +121,11 @@ export default function ActivityHeatmap() {
       <div className="w-full max-w-[560px]">
         {/* Header */}
         <div className="mb-5 flex items-baseline justify-between">
-          <h2 className="text-[14px] font-medium tracking-[-0.01em] text-[var(--color-text)]">
-            Activity, last year
+          <h2
+            className="font-display text-[19px] italic leading-none text-[var(--color-text)]"
+            style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+          >
+            Activity, last year.
           </h2>
           <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
             {total.toLocaleString()} contributions
@@ -216,7 +219,9 @@ export default function ActivityHeatmap() {
             })}
           </g>
 
-          {/* Legend — density ramp showing how many dots = how much value. */}
+          {/* Legend — calibrated area scale. Numeric anchors at each end so
+              the ramp reads as "0 to {max} contributions" rather than the
+              ordinal less → more. */}
           <g
             transform={`translate(${dayLabelGutter} ${
               monthLabelHeight + gridHeight + legendGap
@@ -229,18 +234,17 @@ export default function ActivityHeatmap() {
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 7,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
+                letterSpacing: "0.12em",
               }}
             >
-              less
+              0
             </text>
             {[0, 0.25, 0.5, 0.75, 1].map((norm, i) => {
               const r = radiusFor(norm, 1);
               return (
                 <g
                   key={i}
-                  transform={`translate(${30 + i * (CELL + 2)} 0)`}
+                  transform={`translate(${18 + i * (CELL + 2)} 0)`}
                 >
                   <circle
                     cx={CELL / 2}
@@ -252,17 +256,16 @@ export default function ActivityHeatmap() {
               );
             })}
             <text
-              x={30 + 5 * (CELL + 2) + 4}
+              x={18 + 5 * (CELL + 2) + 4}
               y={CELL - 1}
               className="fill-[var(--color-text-muted)]"
               style={{
                 fontFamily: "var(--font-mono)",
                 fontSize: 7,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
+                letterSpacing: "0.12em",
               }}
             >
-              more
+              {max} / day
             </text>
           </g>
         </svg>
