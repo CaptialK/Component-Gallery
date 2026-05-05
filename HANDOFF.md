@@ -10,7 +10,7 @@ A Next.js portfolio site that ships ~50 hand-designed SaaS UI components as **pl
 
 This is design-in-the-medium. There are no Figma files. The dev server is the design tool. The registry is the source of truth. Plates are evaluated by running the actual page and looking at it.
 
-**Current state (2026-05-05):** 26 plates shipped — 13 SaaS / 13 medical. All three design-research spikes signed off. 3 of 5 ship-readiness criteria met (the remaining two are external — `SITE_URL` resolution + live deploy). The catalogue is sorted by domain (SaaS / Medical SaaS) on the home page. The SaaS section is now **product-grade** — plates wire real validation, selection, filtering, toasts, modals — while medical retains the specimen framing (see `DECISIONS.md` 2026-05-05). Vinson is in active expand-the-catalogue mode interleaved with polish work.
+**Current state (2026-05-05):** 26 plates shipped — 13 SaaS / 13 medical. All three design-research spikes signed off. 3 of 5 ship-readiness criteria met (the remaining two are external — `SITE_URL` resolution + live deploy). The catalogue is sorted by domain (SaaS / Medical SaaS) on the home page. The SaaS section is now shipping at **THE STANDARD** bar (see `DECISIONS.md` 2026-05-05): loading skeletons + empty states + error states + 375/768/1024 responsive layouts + a11y polish (aria-current/aria-pressed/aria-live, role="meter" on quota gauges, focus-trap on modals, keyboard equivalents) + edge-case handling (paste-trim, dedupe, divide-by-zero, long-string truncate, two-step destructive confirms) across all 13 SaaS plates. Two new shared primitives — `EmptyState` and `ErrorState` — were added to `_kit/` so the bar is the path of least resistance. Medical retains the specimen framing — see "Open follow-ups." Vinson is in active expand-the-catalogue mode interleaved with polish work.
 
 ## The single most important rule
 
@@ -61,6 +61,7 @@ The "bad-day pass" cycle (see methodology section below) repeatedly surfaces the
 - ❌ **Quantitative encoding via density.** Use length (`Trace`) or area (sized dot, radius² scales) instead. Cleveland-McGill ranks both above density/texture.
 - ❌ **Symbol or color encoding without a visible key/legend.** If a reader has to infer what a colour or shape means, the encoding hasn't earned its space. Status palettes get a `STATUS_INK` map + a legend strip. Activity-heatmap legend is calibrated ("0 / max"), not ordinal ("less / more"). Owner initials get `title=full-name` tooltips.
 - ❌ **Treating the SaaS specimen-shift as a license to relax the aesthetic or motion budget.** The 2026-05-05 decision relaxed only the *specimen framing* for SaaS — plates can now wire validation, modals, popovers, menus, toasts, real selection state. The aesthetic, the motion budget, and every entry in `CLAUDE.md` "Forbidden patterns" hold unchanged. Still forbidden: animated SVG geometry, `framer-motion`, shimmer sweeps, dots-as-background under text or data, hover-just-lightens-bg, triple-encoded badges, gradient text, glassmorphism, Sparkles icon. Two keyframes are licensed (`live-pulse`, `caret-blink`) — adding a third is a `DECISIONS.md` decision, not a styling pass. Medical plates retain the specimen framing — they're not rewired.
+- ❌ **Treating THE STANDARD pass as a license to introduce new motion, new chrome, or stippled error/empty surfaces.** The 2026-05-05 completeness bar (see `DECISIONS.md`) added loading / empty / error / responsive / a11y / edge cases as required — not new motion, not new color, not new texture. Still forbidden after THE STANDARD: shimmer-sweep skeletons (the new pattern is opacity-only crossfade between skeleton and real content; no horizontal sweep, no gradient mask), animated SVG geometry on loading or error states, `framer-motion` for any of the new transitions, tinted-error-backgrounds-as-stippled-fills (the `ErrorState` banner uses flat `color-mix(in oklch, var(--color-accent) 8%, var(--color-bg))` — *never* a dot field under data or beneath the message body), and the eternal hover-just-lightens-bg (still requires accent strip + faint surface). The completeness bar is on what plates *cover*, not what they animate.
 
 ## The catalogue taxonomy
 
@@ -150,6 +151,10 @@ A "comfortable batch" is **3 plates × 2 variants = 6 builds**, then cull to 3, 
 
 When a batch touches many plates *and* introduces shared primitives (the 2026-05-05 SaaS specimen-shift was the canonical case: 10 plates rewired + 3 new built + 6 new `_kit/` primitives + provider route-gating), layer audit-split-verify on top of head-to-head. Read the affected surface as one (audit), split into independent passes that can land coherently (split: primitives → existing-plate rewires → new-plate builds → tests), verify each pass against `pnpm typecheck` + `pnpm build` + targeted re-snaps before moving to the next. Methodology details live in the memory files; this is just the pointer.
 
+## THE STANDARD
+
+THE STANDARD is the codified completeness bar for SaaS plates — laid down 2026-05-05 and applied as a sweep across all 13 SaaS plates the same day. A plate isn't done until it has all real states (loading skeletons via opacity crossfade, empty states via `_kit/empty-state.tsx`, error states via `_kit/error-state.tsx`), responsive layouts at 375/768/1024, a11y polish (aria-current/aria-pressed/aria-live, role="meter" on quota gauges, focus-trap on modals, keyboard equivalents), realistic data, interaction polish (opacity crossfades on text swaps, explicit border-color transitions), and edge cases handled (paste-trim, dedupe, divide-by-zero, long-string truncate + tooltips, two-step destructive confirms with focus-on-mount). The aesthetic and motion budget are *not* relaxed — THE STANDARD is a completeness bar, not a flair bar. Full decision (problem → options → choice → tradeoff → signal) lives in `DECISIONS.md` 2026-05-05. The workflow that landed it is audit-split-verify above.
+
 ## Common task crib sheet
 
 ```bash
@@ -186,6 +191,8 @@ components/_kit/                      System primitives
   menu.tsx                            Base UI Menu with the gallery's row vocabulary — left accent strip on highlight, mono-caps headings, <kbd> shortcuts.
   combobox.tsx                        Base UI Combobox for "search-with-results-list" surfaces (distinct from the ⌘K palette).
   field-error.tsx                     Tiny helper for per-field error display + aria-invalid wiring.
+  empty-state.tsx                     Empty-surface vocabulary: <EmptyState illustration eyebrow title body action secondary align density>. Fraunces italic title, mono-caps eyebrow, max-44ch body, primary/ghost action button. Server-renderable. 9 plates consume.
+  error-state.tsx                     Error vocabulary in three variants: <ErrorState title body variant onRetry onDismiss lastSync> with variant="banner"|"inline"|"fullscreen". Persimmon left-strip + 6px dot punctuates; flat color-mix tint, no dot field. 200ms paper-ease mount fade, opacity only. 11 plates consume.
 
 components/showcase/<category>/<slug>.tsx
                                       One file per plate. Self-contained.
@@ -249,6 +256,7 @@ Update these as you learn things; don't write into `MEMORY.md` directly (it's th
 2. **`SITE_URL` resolution.** Placeholder still in tree. Gates on the `vinsonfx.com` monorepo absorbing the gallery. Not on you — external work.
 3. **Live deploy URL.** Depends on #2.
 4. **Open question: medical interactivity?** The 2026-05-05 specimen-shift was scoped to SaaS by intent — clinical SaaS reads more honestly as a frozen specimen because it isn't a real EHR. If Vinson later wants medical wired up, that's a separate decision (and probably partial: vitals-monitor live-pulse is justifiable, full MAR-as-app is not). Don't volunteer it.
+5. **Medical section retains specimen framing — has NOT had THE STANDARD pass.** The 2026-05-05 STANDARD sweep landed across all 13 SaaS plates only. The 8 medical plates (chart-header, care-team-rail, bed-board, vitals-monitor, triage-queue, medication-list, lab-results, discharge-summary, intake-soap-note, appointment-week, order-entry, encounter-timeline, no-encounters-yet — 13 in total) read more honestly as frozen specimen because the surface is intentionally an unworked product, not a real EHR. They don't ship loading skeletons, error states for fetch failures, or 375/768 responsive layouts; that's a deliberate non-goal of the specimen framing. If Vinson later asks for medical interactivity (#4 above), THE STANDARD pass is the natural next step — and it's a separate batch, not a free addendum.
 
 The design system is locked. Most work going forward is plate creation + maintenance against the rules above. The six new `_kit/` interactive primitives (modal, toast, popover, menu, combobox, field-error) are now part of the kit — reach for them rather than rolling new ones per plate.
 

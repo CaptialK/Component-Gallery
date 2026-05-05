@@ -16,24 +16,37 @@ test.describe("interactions", () => {
     const dialog = page.getByRole("dialog", { name: "Command palette" });
     await expect(dialog).toBeVisible();
 
-    // Capture which button is highlighted (non-transparent bg) before & after.
-    const selectedBgIndex = () =>
-      dialog.locator("button[type=button]").evaluateAll((els) =>
-        els.findIndex((el) => {
-          const bg = (el as HTMLElement).style.backgroundColor;
-          return Boolean(bg) && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)";
-        }),
-      );
+    // Window-level keydown listeners require the page to actually have
+    // focus. Headless Chromium starts pages unfocused; click on the body
+    // first so subsequent keypresses dispatch.
+    // The canonical pose has query `"invoic"` which filters to a single
+    // result — there's nowhere for ArrowDown to traverse. Clear the input
+    // first so all groups + rows render, then traversal has somewhere to go.
+    const search = dialog.getByRole("combobox");
+    await search.fill("");
 
-    const before = await selectedBgIndex();
-    // Three ArrowDowns; the global keydown listener handles them.
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("ArrowDown");
-    const after = await selectedBgIndex();
+    // Plate's keyboard listener is on `window`. Fire directly to remove
+    // any focus-target ambiguity under parallel-worker load.
+    const fireKey = (key: string) =>
+      page.evaluate((k) => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
+      }, key);
+
+    // The selected option is marked with `data-selected="true"` — stable
+    // selector that survives style/aria refactors.
+    const selectedLabel = () =>
+      dialog.locator('[data-selected="true"]').first().textContent();
+
+    const before = await selectedLabel();
+    expect(before, "a row should be selected by default").toBeTruthy();
+
+    await fireKey("ArrowDown");
+    await fireKey("ArrowDown");
+    await fireKey("ArrowDown");
+    const after = await selectedLabel();
     expect(after, "selection should advance after ArrowDown").not.toBe(before);
 
-    await page.keyboard.press("Enter");
+    await fireKey("Enter");
     await expect(page.getByRole("status").first()).toBeVisible({ timeout: 2_000 });
   });
 
@@ -57,7 +70,10 @@ test.describe("interactions", () => {
 
   test("activity heatmap: click pins, Escape unpins", async ({ page }) => {
     await page.goto("/c/dashboards/activity-heatmap");
-    const svg = page.locator('svg[role="img"][aria-label*="Contribution heatmap"]');
+    // The heatmap SVG is `role="application"` (a single live region replaces
+    // per-cell labels for an O(371) → O(1) a11y tree). Selector matches on
+    // the aria-label rather than role to stay resilient.
+    const svg = page.locator('svg[aria-label*="Contribution heatmap"]');
     await expect(svg).toBeVisible();
 
     // Click somewhere on the grid — pointer-down/up at the same cell pins it.

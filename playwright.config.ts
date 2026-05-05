@@ -25,8 +25,12 @@ export default defineConfig({
   timeout: 15_000,
   expect: { timeout: 5_000 },
   forbidOnly: Boolean(process.env.CI),
-  fullyParallel: !process.env.CI,
-  workers: process.env.CI ? 1 : undefined,
+  // Single worker even locally — `pnpm dev`'s Next.js compiler chokes when
+  // 4 parallel goto()s hit cold routes simultaneously, producing flaky
+  // page-error and selection-state failures. Predictability > speed for a
+  // ~30s portfolio suite.
+  fullyParallel: false,
+  workers: 1,
   retries: 0,
   reporter: process.env.CI ? "github" : "list",
   use: {

@@ -19,12 +19,15 @@
  * Self-contained client component. No registry edits.
  */
 
-import { useMemo, useReducer, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { Copy, Eye, EyeOff, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
 import { Modal, ModalClose, ModalTitle, ModalDescription } from "@/components/_kit/modal";
 import { useToast } from "@/components/_kit/toast";
+import { Skeleton } from "@/components/_kit/skeleton";
+import { EmptyState } from "@/components/_kit/empty-state";
+import { ErrorState } from "@/components/_kit/error-state";
 
 const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
@@ -134,6 +137,19 @@ function quantizeRecency(r: number): -1 | 0 | 0.5 | 1 {
   return 1;
 }
 
+// Compose an aria description for the recency trail using the 3-level legend:
+// "most recent · recent · faint · never used".
+function describeRecencyTrail(rs: number[]): string {
+  const labels = rs.map((r) => {
+    const q = quantizeRecency(r);
+    if (q === -1) return "never used";
+    if (q === 1) return "most recent";
+    if (q === 0.5) return "recent";
+    return "faint";
+  });
+  return `Recency · ${labels.join(", ")}`;
+}
+
 // Per-card consolidated state — replaces 5 useState hooks.
 type CardState = {
   revealed: boolean;
@@ -176,24 +192,43 @@ function fullSecret(prefix: string, last4: string): string {
 
 export default function ApiKeysAlt() {
   const { toast } = useToast();
-  const expiringCount = KEYS.filter((k) => k.lastUsed.startsWith("expiring")).length;
+  const [loading, setLoading] = useState(true);
+  // Toggle to demo the empty workspace path. The plate ships with KEYS, so
+  // this is normally false; reading lib/registry isn't allowed for this pass,
+  // so the empty state renders only if the keys array goes empty at runtime.
+  const keys = KEYS;
+  const noKeys = keys.length === 0;
+  const expiringCount = keys.filter((k) => k.lastUsed.startsWith("expiring")).length;
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setLoading(false), 240);
+    return () => window.clearTimeout(t);
+  }, []);
 
   // Single shared confirm-modal state — replaces one modal per card.
   const [confirmingKeyId, setConfirmingKeyId] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [revokedSet, setRevokedSet] = useState<Set<string>>(() => new Set());
+  const [revokeError, setRevokeError] = useState(false);
 
   const confirmingKey = confirmingKeyId
-    ? KEYS.find((k) => k.name === confirmingKeyId) ?? null
+    ? keys.find((k) => k.name === confirmingKeyId) ?? null
     : null;
 
   const onRequestRevoke = (name: string) => {
     setConfirmText("");
+    setRevokeError(false);
     setConfirmingKeyId(name);
   };
 
   const onConfirmRevoke = () => {
     if (!confirmingKey || confirmText !== confirmingKey.name) return;
+    // 8% simulated revoke failure: keep modal open + inline error.
+    if (Math.random() < 0.08) {
+      setRevokeError(true);
+      return;
+    }
+    setRevokeError(false);
     setRevokedSet((prev) => {
       const next = new Set(prev);
       next.add(confirmingKey.name);
@@ -203,88 +238,69 @@ export default function ApiKeysAlt() {
     setConfirmingKeyId(null);
   };
 
+  // Bottom-sheet modal placement on narrow viewports.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const m = window.matchMedia("(max-width: 640px)");
+    const apply = () => setNarrow(m.matches);
+    apply();
+    m.addEventListener("change", apply);
+    return () => m.removeEventListener("change", apply);
+  }, []);
+
   return (
     <div className="flex h-full w-full flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
-      <Header keyCount={KEYS.length} expiringCount={expiringCount} />
+      <Header keyCount={keys.length} expiringCount={expiringCount} />
       <LegendStrip />
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-4">
-        {KEYS.map((k) => (
-          <KeyCard
-            key={k.name}
-            apiKey={k}
-            externallyRevoked={revokedSet.has(k.name)}
-            onRequestRevoke={() => onRequestRevoke(k.name)}
+      {loading ? (
+        <ApiKeysSkeleton />
+      ) : noKeys ? (
+        <div className="grid min-h-0 flex-1 place-items-center px-6 py-4">
+          <EmptyState
+            title="No API keys yet."
+            body="Generate one to start authenticating requests."
+            action={{
+              label: "New key",
+              onClick: () => toast({ title: "Create key", status: "info" }),
+            }}
           />
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-4">
+          {keys.map((k) => (
+            <KeyCard
+              key={k.name}
+              apiKey={k}
+              externallyRevoked={revokedSet.has(k.name)}
+              onRequestRevoke={() => onRequestRevoke(k.name)}
+            />
+          ))}
+        </div>
+      )}
 
       {/* Single shared confirm modal — driven by parent state. */}
       <Modal
         open={confirmingKeyId !== null}
         onOpenChange={(open) => {
-          if (!open) setConfirmingKeyId(null);
+          if (!open) {
+            setConfirmingKeyId(null);
+            setRevokeError(false);
+          }
         }}
-        placement="center"
+        placement={narrow ? "bottom" : "center"}
         size="sm"
         ariaLabel={confirmingKey ? `Revoke ${confirmingKey.name}` : "Revoke key"}
       >
         {confirmingKey && (
-          <div className="px-4 py-4">
-            <ModalTitle
-              render={
-                <h2
-                  className="font-display text-[18px] italic leading-none tracking-[-0.02em] text-[var(--color-text)]"
-                  style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
-                >
-                  Revoke key
-                </h2>
-              }
-            />
-            <ModalDescription
-              render={
-                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
-                  This action cannot be undone. The key will stop authenticating
-                  immediately. Type{" "}
-                  <span className="font-mono text-[var(--color-text)]">
-                    {confirmingKey.name}
-                  </span>{" "}
-                  to confirm.
-                </p>
-              }
-            />
-            <input
-              value={confirmText}
-              onChange={(e) => setConfirmText(e.target.value)}
-              placeholder={confirmingKey.name}
-              aria-label="Confirm key name"
-              className="mt-3 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-border-strong)]"
-            />
-            <div className="mt-3 flex items-center justify-end gap-2">
-              <ModalClose
-                render={
-                  <button
-                    type="button"
-                    className="inline-flex h-7 items-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
-                  >
-                    Cancel
-                  </button>
-                }
-              />
-              <button
-                type="button"
-                onClick={onConfirmRevoke}
-                disabled={confirmText !== confirmingKey.name}
-                className={cn(
-                  "inline-flex h-7 items-center rounded-[var(--radius-sm)] border px-2 font-mono text-[10px] uppercase tracking-[0.14em] transition-[border-color,color,background-color] duration-[120ms] ease-out",
-                  confirmText === confirmingKey.name
-                    ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
-                    : "cursor-not-allowed border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)]",
-                )}
-              >
-                Revoke
-              </button>
-            </div>
-          </div>
+          <RevokeConfirmBody
+            confirmingKey={confirmingKey}
+            confirmText={confirmText}
+            setConfirmText={setConfirmText}
+            onConfirm={onConfirmRevoke}
+            error={revokeError}
+            onClearError={() => setRevokeError(false)}
+          />
         )}
       </Modal>
     </div>
@@ -372,6 +388,8 @@ function KeyCard({
   const [state, dispatch] = useReducer(cardReducer, INITIAL_CARD_STATE);
   const revoked = state.revoked || externallyRevoked;
   const { revealed, rotating } = state;
+  // Persimmon trace-fade flash on rotate fail.
+  const [rotateFailFlash, setRotateFailFlash] = useState(false);
 
   const usagePoints: TracePoint[] = useMemo(
     () => apiKey.usage.map((v, i) => ({ x: i, y: v })),
@@ -395,18 +413,38 @@ function KeyCard({
   const onRotate = () => {
     if (revoked || rotating) return;
     dispatch({ type: "rotate-start" });
-    // Single 320ms perimeter trace, then 3 cycles of live-pulse (~6s), then toast.
+    const willFail = Math.random() < 0.08;
     window.setTimeout(() => {
       dispatch({ type: "rotate-end" });
-      toast({ title: `Key rotated · ${apiKey.name}`, status: "success" });
+      if (willFail) {
+        setRotateFailFlash(true);
+        window.setTimeout(() => setRotateFailFlash(false), 200);
+        toast({ title: "Rotate failed. Retry.", status: "error" });
+      } else {
+        toast({ title: `Key rotated · ${apiKey.name}`, status: "success" });
+      }
     }, 320 + 2000 * 3);
   };
 
+  const onReveal = () => {
+    if (revoked) return;
+    // 8% simulated MFA-required failure on reveal.
+    if (!state.revealed && Math.random() < 0.08) {
+      toast({ title: "Auth required to reveal.", status: "error" });
+      return;
+    }
+    dispatch({ type: "toggle-reveal" });
+  };
+
+  const labelId = `key-${apiKey.name}`;
   return (
-    <div
+    <article
       data-key={apiKey.name}
+      aria-labelledby={labelId}
       className={cn(
         "group relative flex min-h-[120px] gap-3 rounded-[var(--radius-sm)] border px-3 py-3 transition-[border-color,opacity] duration-[200ms] ease-out hover:border-[var(--color-border-strong)]",
+        // Stack thirds on mobile, 3-col on >=sm (with trim at sm vs lg).
+        "flex-col sm:flex-row",
         revoked
           ? "border-[var(--color-border)] opacity-40"
           : "border-[var(--color-border)]",
@@ -484,7 +522,7 @@ function KeyCard({
       )}
 
       {/* LEFT THIRD — creator + meta + recency trail. */}
-      <div className="flex w-44 shrink-0 flex-col gap-1.5">
+      <div className="flex shrink-0 flex-col gap-1.5 sm:w-40 lg:w-44">
         <div className="flex items-center gap-2">
           <span
             title={MEMBERS[apiKey.createdBy] ?? apiKey.createdBy}
@@ -493,7 +531,11 @@ function KeyCard({
             {apiKey.createdBy}
           </span>
           <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium text-[var(--color-text)]">
+            <div
+              id={labelId}
+              className="truncate text-[13px] font-medium text-[var(--color-text)]"
+              title={apiKey.name}
+            >
               {apiKey.name}
             </div>
             <div className="font-mono text-[10px] text-[var(--color-text-muted)]">
@@ -507,7 +549,7 @@ function KeyCard({
         {/* 5-slot recency trail — quantized to 3 levels, hairline-stroke circle for "never used". */}
         <div
           className="flex items-center gap-1"
-          aria-label={`Recency trail: ${apiKey.recency.map((r) => Math.round(r * 100) + "%").join(", ")}`}
+          aria-label={describeRecencyTrail(apiKey.recency)}
         >
           {apiKey.recency.map((r, i) => {
             const q = quantizeRecency(r);
@@ -554,39 +596,48 @@ function KeyCard({
       {/* MIDDLE THIRD — scopes + masked secret. */}
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-center gap-1">
-          {apiKey.scopes.map((s) => (
-            <span
-              key={s}
-              className="inline-flex h-5 items-center gap-1 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 font-mono text-[10px] uppercase tracking-[0.06em]"
-              style={{ color: SCOPE_INK[s] }}
-            >
-              <span
-                aria-hidden
-                className="h-1 w-1 rounded-full"
-                style={{ background: SCOPE_INK[s] }}
-              />
-              {s}
+          {apiKey.scopes.length === 0 ? (
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+              no scopes assigned
             </span>
-          ))}
+          ) : (
+            apiKey.scopes.map((s) => (
+              <span
+                key={s}
+                className="inline-flex h-5 items-center gap-1 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-bg)] px-1.5 font-mono text-[10px] uppercase tracking-[0.06em]"
+                style={{ color: SCOPE_INK[s] }}
+              >
+                <span
+                  aria-hidden
+                  className="h-1 w-1 rounded-full"
+                  style={{ background: SCOPE_INK[s] }}
+                />
+                {s}
+              </span>
+            ))
+          )}
         </div>
         <div className="relative flex items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5">
           <span
             data-secret
+            aria-label={revoked ? "(revoked)" : undefined}
             className="min-w-0 flex-1 truncate font-mono text-[12.5px] tracking-[0.02em] text-[var(--color-text)]"
           >
             {revealed ? full : masked}
           </span>
-          {/* Persimmon strikethrough on revoke. */}
-          {revoked && (
-            <span
-              aria-hidden
-              className="pointer-events-none absolute inset-x-2 top-1/2 h-[1.5px] -translate-y-1/2"
-              style={{ background: "var(--color-accent)" }}
-            />
-          )}
+          {/* Persimmon strikethrough on revoke — fade-in via opacity. */}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-2 top-1/2 h-[1.5px] -translate-y-1/2"
+            style={{
+              background: "var(--color-accent)",
+              opacity: revoked ? 1 : 0,
+              transition: `opacity 200ms ${PAPER_EASE}`,
+            }}
+          />
           <button
             type="button"
-            onClick={() => dispatch({ type: "toggle-reveal" })}
+            onClick={onReveal}
             disabled={revoked}
             aria-label={revealed ? "Hide secret" : "Reveal secret"}
             className={cn(
@@ -632,8 +683,9 @@ function KeyCard({
         </div>
       </div>
 
-      {/* RIGHT THIRD — sparkline + p99 + danger zone. */}
-      <div className="flex w-32 shrink-0 flex-col items-end gap-1.5">
+      {/* RIGHT THIRD — sparkline + p99 + danger zone. Stack as a row on
+          mobile so the third sits below the masked secret. */}
+      <div className="flex shrink-0 flex-row items-center justify-between gap-3 sm:flex-col sm:items-end sm:gap-1.5 sm:w-28 lg:w-32">
         <div className="h-7 w-[100px]">
           <Trace
             data={usagePoints}
@@ -641,7 +693,11 @@ function KeyCard({
             height={20}
             yDomain={[0, max * 1.1]}
             strokeColor={
-              revoked ? "var(--color-text-muted)" : "var(--color-text)"
+              rotateFailFlash
+                ? "var(--color-accent)"
+                : revoked
+                  ? "var(--color-text-muted)"
+                  : "var(--color-text)"
             }
             strokeWidth={1.1}
             smooth
@@ -699,6 +755,123 @@ function KeyCard({
         </div>
       </div>
 
+    </article>
+  );
+}
+
+function RevokeConfirmBody({
+  confirmingKey,
+  confirmText,
+  setConfirmText,
+  onConfirm,
+  error,
+  onClearError,
+}: {
+  confirmingKey: ApiKey;
+  confirmText: string;
+  setConfirmText: (v: string) => void;
+  onConfirm: () => void;
+  error: boolean;
+  onClearError: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const descId = `revoke-desc-${confirmingKey.name}`;
+  // Auto-focus the input on mount so the modal lands ready-for-typing.
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  return (
+    <div className="px-4 py-4">
+      <ModalTitle
+        render={
+          <h2
+            className="font-display text-[18px] italic leading-none tracking-[-0.02em] text-[var(--color-text)]"
+            style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+          >
+            Revoke key
+          </h2>
+        }
+      />
+      <ModalDescription
+        render={
+          <p id={descId} className="mt-2 text-xs text-[var(--color-text-muted)]">
+            This action cannot be undone. The key will stop authenticating
+            immediately. Type{" "}
+            <span className="font-mono text-[var(--color-text)]">
+              {confirmingKey.name}
+            </span>{" "}
+            to confirm.
+          </p>
+        }
+      />
+      {error && (
+        <div className="mt-3">
+          <ErrorState
+            variant="inline"
+            title="Couldn't revoke. Retry."
+            onDismiss={onClearError}
+          />
+        </div>
+      )}
+      <input
+        ref={inputRef}
+        value={confirmText}
+        onChange={(e) => setConfirmText(e.target.value)}
+        placeholder={confirmingKey.name}
+        aria-label="Confirm key name"
+        aria-describedby={descId}
+        className="mt-3 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1.5 font-mono text-[12px] text-[var(--color-text)] outline-none focus:border-[var(--color-border-strong)]"
+      />
+      <div className="mt-3 flex items-center justify-end gap-2">
+        <ModalClose
+          render={
+            <button
+              type="button"
+              className="inline-flex h-7 items-center rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)] hover:border-[var(--color-border-strong)] hover:text-[var(--color-text)]"
+            >
+              Cancel
+            </button>
+          }
+        />
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={confirmText !== confirmingKey.name}
+          className={cn(
+            "inline-flex h-7 items-center rounded-[var(--radius-sm)] border px-2 font-mono text-[10px] uppercase tracking-[0.14em] transition-[border-color,color,background-color] duration-[120ms] ease-out",
+            confirmText === confirmingKey.name
+              ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+              : "cursor-not-allowed border-[var(--color-border)] bg-[var(--color-bg)] text-[var(--color-text-muted)]",
+          )}
+        >
+          {error ? "Retry" : "Revoke"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ApiKeysSkeleton() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-6 py-4">
+      {Array.from({ length: 5 }).map((_, i) => (
+        <div
+          key={i}
+          className="flex min-h-[120px] flex-col gap-3 rounded-[var(--radius-sm)] border border-[var(--color-border)] px-3 py-3 sm:flex-row"
+        >
+          <Skeleton width={176} height={88} density={0.05} seed={11 + i} className="h-[88px] sm:w-44" />
+          <Skeleton width={300} height={88} density={0.05} seed={31 + i} className="h-[88px] flex-1" />
+          <div className="flex shrink-0 flex-col items-end gap-1.5 sm:w-32">
+            <Skeleton width={100} height={20} density={0.05} seed={51 + i} className="h-5 w-[100px]" />
+            <Skeleton width={64} height={14} density={0.05} seed={71 + i} className="h-3.5 w-16" />
+            <Skeleton width={64} height={20} density={0.05} seed={91 + i} className="h-5 w-16" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

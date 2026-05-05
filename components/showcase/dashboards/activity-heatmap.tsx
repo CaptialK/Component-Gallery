@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { mulberry32 } from "@/components/_kit/dot-noise";
+import { EmptyState } from "@/components/_kit/empty-state";
+import { ErrorState } from "@/components/_kit/error-state";
+import { Skeleton } from "@/components/_kit/skeleton";
 
 /**
  * Activity heatmap — Spike 3, area-as-data.
@@ -16,19 +19,22 @@ import { mulberry32 } from "@/components/_kit/dot-noise";
  * on a *per-cell* basis: the smallest dot covers ~3% of its cell (always
  * visible), the largest ~22% (never flat fill).
  *
- * Interactivity (deep-wire pass, 2026-05-04):
- *  - Year toggle: 2025 / 2026 — reseeds generateActivity with a different
- *    seed; SVG group fades opacity 0→1 over 200ms during seed swap.
- *  - Range toggle: 12W / 26W / 52W slices the cells array.
- *  - Click-to-pin: thin Federal Blue 1px ring overlay marks the pinned cell
- *    (opacity-only animated 120ms — never animates r/cx/cy). Esc clears.
- *  - Keyboard nav: tabIndex=0 on SVG; arrows move the focusCell, walnut 1px
- *    rect renders the focus, Enter pins, "t" jumps to today.
- *  - Brush-drag: pointer-down/move sets a date range; cells outside dim to
- *    35% via fillOpacity (CSS-driven, not animating r). Footer line shows
- *    range + total.
+ * State refinement (2026-05-05):
+ *  - Loading: grid of <Skeleton> blocks at cell geometry; crystallizes via
+ *    opacity crossfade into the radius-encoded marks (320ms paper-ease,
+ *    no `r` animation). Gated by `loading` flag (240ms simulated).
+ *  - Empty: 0 contributions — full grid stays at MIN_R, EmptyState overlays.
+ *    Year/range pills hide.
+ *  - Error: ErrorState fullscreen overlay; grid dims to 40% beneath. Retry.
+ *  - A11y: per-cell aria-labels removed (371-node tree); single role
+ *    "application" on the SVG + aria-live region beside it announces the
+ *    focused / hovered / brushed cell. Brush-end announces range + total.
+ *  - Pinned cell exempt from range-dim filter — stays full-opacity.
+ *  - 375px: minWidth 680 keeps cells legible (already); pills row stacks at
+ *    <480px; footer wraps; tooltip clamps to viewport.
  *
- * Client component — local state for hover/pin/focus/range/year/window.
+ * Client component — local state for hover/pin/focus/range/year/window/
+ * loading/mode.
  */
 
 const WEEKS_FULL = 53;
@@ -44,6 +50,8 @@ const MIN_R_SQ = (BASELINE * CELL_AREA) / Math.PI;
 const MAX_R_SQ = (MAX_COVERAGE * CELL_AREA) / Math.PI;
 const MIN_R = Math.sqrt(MIN_R_SQ);
 
+const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const DAY_LABELS: Array<{ index: number; label: string }> = [
   { index: 1, label: "Mon" },
@@ -52,6 +60,7 @@ const DAY_LABELS: Array<{ index: number; label: string }> = [
 ];
 
 type Cell = { value: number; week: number; day: number };
+type Mode = "live" | "empty" | "error";
 
 function generateActivity(seed: number): Cell[] {
   const rng = mulberry32(seed);
@@ -65,6 +74,16 @@ function generateActivity(seed: number): Cell[] {
       else if (r < 0.9) value = 6 + Math.floor(rng() * 14);
       else value = 20 + Math.floor(rng() * 38);
       cells.push({ value, week: w, day: d });
+    }
+  }
+  return cells;
+}
+
+function emptyActivity(): Cell[] {
+  const cells: Cell[] = [];
+  for (let w = 0; w < WEEKS_FULL; w++) {
+    for (let d = 0; d < DAYS; d++) {
+      cells.push({ value: 0, week: w, day: d });
     }
   }
   return cells;
@@ -122,6 +141,28 @@ export default function ActivityHeatmap() {
   const [hovered, setHovered] = useState<Cell | null>(null);
   const [pinned, setPinned] = useState<Cell | null>(null);
   const [focusCell, setFocusCell] = useState<{ week: number; day: number } | null>(null);
+  const [mode, setMode] = useState<Mode>("live");
+  const [loading, setLoading] = useState(true);
+  const [liveMessage, setLiveMessage] = useState("");
+
+  // First-paint skeleton crystallizes over 240ms.
+  useEffect(() => {
+    const id = window.setTimeout(() => setLoading(false), 240);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  // Hash-based mode toggle for testing (#empty / #error / clear).
+  useEffect(() => {
+    const sync = () => {
+      const h = window.location.hash;
+      if (h === "#empty") setMode("empty");
+      else if (h === "#error") setMode("error");
+      else setMode("live");
+    };
+    sync();
+    window.addEventListener("hashchange", sync);
+    return () => window.removeEventListener("hashchange", sync);
+  }, []);
 
   // Brush-drag state.
   const [brush, setBrush] = useState<
@@ -133,7 +174,10 @@ export default function ActivityHeatmap() {
   // Subtle fade group during year/range swaps.
   const [swapping, setSwapping] = useState(false);
   const yearSeed = YEARS.find((y) => y.id === year)!.seed;
-  const allCells = useMemo(() => generateActivity(yearSeed), [yearSeed]);
+  const allCells = useMemo(() => {
+    if (mode === "empty") return emptyActivity();
+    return generateActivity(yearSeed);
+  }, [yearSeed, mode]);
   const weeksToShow = RANGES.find((r) => r.id === rangeId)!.weeks;
   const cells = useMemo(() => {
     // Slice to last `weeksToShow` weeks. Cells are indexed [week*7 + day].
@@ -160,6 +204,14 @@ export default function ActivityHeatmap() {
     const id = window.setTimeout(() => setSwapping(false), 200);
     return () => window.clearTimeout(id);
   }, [swapKey]);
+
+  // aria-live announcement on focus/hover changes.
+  useEffect(() => {
+    const c = hovered ?? (focusCell
+      ? cells.find((x) => x.week === focusCell.week && x.day === focusCell.day) ?? null
+      : null);
+    if (c) setLiveMessage(describeCell(c));
+  }, [hovered, focusCell, cells]);
 
   // Layout sizes (SVG user units).
   const dayLabelGutter = 32;
@@ -200,9 +252,10 @@ export default function ActivityHeatmap() {
       return;
     }
     if (e.key === "t" || e.key === "T") {
-      const tw = weeksToShow - 1;
+      // Guard: clamp week into displayed range when today falls outside.
+      const tw = Math.min(weeksToShow - 1, weeksToShow - 1);
       const today = new Date();
-      const day = today.getDay();
+      const day = Math.max(0, Math.min(DAYS - 1, today.getDay()));
       setFocusCell({ week: tw, day });
       e.preventDefault();
       return;
@@ -227,6 +280,11 @@ export default function ActivityHeatmap() {
     }
     setFocusCell({ week, day });
     e.preventDefault();
+  };
+
+  // Cleanup brush state if pointer is cancelled (touch interruption).
+  const cancelBrush = () => {
+    if (brush.kind === "dragging") setBrush({ kind: "none" });
   };
 
   // Brush-drag pointer handlers.
@@ -256,6 +314,19 @@ export default function ActivityHeatmap() {
       setBrush({ kind: "none" });
     } else {
       setBrush({ kind: "set", start, end });
+      // Announce range + total via aria-live region.
+      const w0 = Math.min(start.week, end.week);
+      const w1 = Math.max(start.week, end.week);
+      const d0 = Math.min(start.day, end.day);
+      const d1 = Math.max(start.day, end.day);
+      const inSel = (c: Cell) =>
+        c.week >= w0 && c.week <= w1 && c.day >= d0 && c.day <= d1;
+      const totalSel = cells.filter(inSel).reduce((s, c) => s + c.value, 0);
+      setLiveMessage(
+        `Selected ${dateLabel(w0, d0)} to ${dateLabel(w1, d1)}, ${totalSel} contribution${
+          totalSel === 1 ? "" : "s"
+        }.`,
+      );
     }
     try {
       (e.target as Element).releasePointerCapture(e.pointerId);
@@ -280,6 +351,8 @@ export default function ActivityHeatmap() {
     c.week <= range.w1 &&
     c.day >= range.d0 &&
     c.day <= range.d1;
+  const isPinned = (c: Cell) =>
+    pinned != null && pinned.week === c.week && pinned.day === c.day;
   const rangeContribs = range
     ? cells.filter(inRange).reduce((s, c) => s + c.value, 0)
     : 0;
@@ -294,240 +367,332 @@ export default function ActivityHeatmap() {
   // hover; hover overrides everything when present.
   const tooltipCell = hovered ?? pinned;
 
+  const isEmpty = mode === "empty";
+  const isError = mode === "error";
+  const showPills = !isEmpty;
+
   return (
     <div className="grid h-full w-full place-items-center bg-[var(--color-bg)] px-7 py-8">
       <div className="w-full max-w-[760px]">
         {/* Header */}
-        <div className="mb-3 flex items-baseline justify-between">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
           <h2
             className="font-display text-[24px] italic leading-none text-[var(--color-text)]"
             style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
           >
             Activity, last year.
           </h2>
-          <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
-            {total.toLocaleString()} contributions
+          {!isEmpty && !isError && (
+            <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+              {total.toLocaleString()} contributions
+            </div>
+          )}
+        </div>
+
+        {/* Toggle row — year pills (left) + range pills (right). Stacks at <480px. */}
+        {showPills && (
+          <div className="mb-4 flex flex-col items-stretch gap-2 min-[480px]:flex-row min-[480px]:flex-wrap min-[480px]:items-center min-[480px]:justify-between">
+            <PillGroup
+              options={YEARS.map((y) => ({ id: y.id, label: y.id }))}
+              value={year}
+              onChange={(v) => setYear(v as "2025" | "2026")}
+              ariaLabel="Year"
+            />
+            <PillGroup
+              options={RANGES.map((r) => ({ id: r.id, label: r.id }))}
+              value={rangeId}
+              onChange={(v) => setRangeId(v as "12W" | "26W" | "52W")}
+              ariaLabel="Range"
+            />
+          </div>
+        )}
+
+        {/* aria-live region — paired with the SVG's role=application. */}
+        <div
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {liveMessage}
+        </div>
+
+        {/* Heatmap region — SVG + skeleton + overlays. */}
+        <div className="relative -mx-1 overflow-x-auto pb-1">
+          <div className="relative" style={{ minWidth: 680 }}>
+            {/* Skeleton grid — same cell geometry, fades out as real cells fade in. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              style={{
+                opacity: loading ? 1 : 0,
+                transition: `opacity 320ms ${PAPER_EASE}`,
+              }}
+            >
+              <SkeletonGrid
+                weeksToShow={weeksToShow}
+                dayLabelGutter={dayLabelGutter}
+                monthLabelHeight={monthLabelHeight}
+                gridWidth={gridWidth}
+                totalWidth={totalWidth}
+                totalHeight={totalHeight}
+              />
+            </div>
+
+            <svg
+              ref={svgRef}
+              viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+              className="block w-full focus:outline-none"
+              style={{
+                touchAction: "none",
+                opacity: loading ? 0 : isError ? 0.4 : 1,
+                transition: `opacity 320ms ${PAPER_EASE}`,
+              }}
+              role="application"
+              aria-label={`Contribution heatmap, ${weeksToShow} weeks. Use arrow keys to navigate; Enter pins; T jumps to today.`}
+              aria-describedby="heatmap-help"
+              tabIndex={isEmpty || isError ? -1 : 0}
+              data-focus-ring="off"
+              onKeyDown={onKeyDown}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerUp}
+              onPointerCancel={cancelBrush}
+            >
+              {/* Month labels above the grid. */}
+              <g transform={`translate(${dayLabelGutter} 0)`}>
+                {MONTHS.map((m, i) => {
+                  const x = (i / 12) * gridWidth;
+                  return (
+                    <text
+                      key={m}
+                      x={x}
+                      y={monthLabelHeight - 5}
+                      className="fill-[var(--color-text-muted)]"
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 9,
+                        letterSpacing: "0.18em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {m}
+                    </text>
+                  );
+                })}
+              </g>
+
+              {/* Day labels. */}
+              <g transform={`translate(0 ${monthLabelHeight})`}>
+                {DAY_LABELS.map(({ index, label }) => (
+                  <text
+                    key={label}
+                    x={0}
+                    y={index * STEP + STEP - 3}
+                    className="fill-[var(--color-text-muted)]"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      letterSpacing: "0.18em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {label}
+                  </text>
+                ))}
+              </g>
+
+              {/* Heatmap cells — wrapped in a swap-faded group. */}
+              <g
+                transform={`translate(${dayLabelGutter} ${monthLabelHeight})`}
+                style={{
+                  opacity: swapping ? 0 : 1,
+                  transition: "opacity 200ms ease-out",
+                }}
+              >
+                {cells.map((c) => {
+                  const r = isEmpty ? MIN_R : radiusFor(c.value, max);
+                  const tx = c.week * STEP;
+                  const ty = c.day * STEP;
+                  // Pinned cell stays full-opacity even when outside an
+                  // active brush range.
+                  const dimmed = range != null && !inRange(c) && !isPinned(c);
+                  return (
+                    <g
+                      key={`${c.week}-${c.day}`}
+                      transform={`translate(${tx} ${ty})`}
+                      onMouseEnter={() => setHovered(c)}
+                      onMouseLeave={() =>
+                        setHovered((prev) =>
+                          prev && prev.week === c.week && prev.day === c.day
+                            ? null
+                            : prev,
+                        )
+                      }
+                    >
+                      <rect
+                        width={CELL}
+                        height={CELL}
+                        fill="transparent"
+                        pointerEvents="all"
+                      />
+                      <circle
+                        cx={CELL / 2}
+                        cy={CELL / 2}
+                        r={r}
+                        fill="var(--color-dot-ink)"
+                        style={{
+                          fillOpacity: dimmed ? 0.35 : 1,
+                          transition: "fill-opacity 200ms ease-out",
+                        }}
+                      />
+                    </g>
+                  );
+                })}
+
+                {/* Pinned ring — opacity-only animated. */}
+                {pinned && (
+                  <rect
+                    key={`pin-${pinned.week}-${pinned.day}`}
+                    x={pinned.week * STEP - 0.5}
+                    y={pinned.day * STEP - 0.5}
+                    width={CELL + 1}
+                    height={CELL + 1}
+                    fill="none"
+                    stroke="var(--color-accent-2)"
+                    strokeWidth={1}
+                    rx={2}
+                    style={{
+                      opacity: 1,
+                      transition: "opacity 120ms ease-out",
+                    }}
+                  />
+                )}
+
+                {/* Focus rect — walnut, 1px. */}
+                {focusCell && (
+                  <rect
+                    x={focusCell.week * STEP - 0.5}
+                    y={focusCell.day * STEP - 0.5}
+                    width={CELL + 1}
+                    height={CELL + 1}
+                    fill="none"
+                    stroke="var(--color-text)"
+                    strokeWidth={1}
+                    strokeDasharray="2 1.5"
+                    opacity={0.65}
+                    rx={2}
+                  />
+                )}
+              </g>
+
+              {/* Legend — calibrated area scale. */}
+              {!isEmpty && (
+                <g
+                  transform={`translate(${dayLabelGutter} ${
+                    monthLabelHeight + gridHeight + legendGap
+                  })`}
+                >
+                  <text
+                    x={0}
+                    y={CELL - 1}
+                    className="fill-[var(--color-text-muted)]"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      letterSpacing: "0.12em",
+                    }}
+                  >
+                    0
+                  </text>
+                  {[0, 0.25, 0.5, 0.75, 1].map((norm, i) => {
+                    const r = radiusFor(norm, 1);
+                    return (
+                      <g
+                        key={i}
+                        transform={`translate(${22 + i * (CELL + 3)} 0)`}
+                      >
+                        <circle
+                          cx={CELL / 2}
+                          cy={CELL / 2}
+                          r={r}
+                          fill="var(--color-dot-ink)"
+                        />
+                      </g>
+                    );
+                  })}
+                  <text
+                    x={22 + 5 * (CELL + 3) + 5}
+                    y={CELL - 1}
+                    className="fill-[var(--color-text-muted)]"
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 9,
+                      letterSpacing: "0.12em",
+                    }}
+                  >
+                    {max} / day
+                  </text>
+                </g>
+              )}
+
+              {/* Custom tooltip. */}
+              {!isEmpty && !isError && (
+                <CellTooltipFader
+                  hovered={tooltipCell}
+                  dayLabelGutter={dayLabelGutter}
+                  monthLabelHeight={monthLabelHeight}
+                  totalWidth={totalWidth}
+                  gridHeight={gridHeight}
+                />
+              )}
+            </svg>
+
+            {/* Empty overlay — grid stays at MIN_R behind. */}
+            {isEmpty && !loading && (
+              <div className="pointer-events-auto absolute inset-0 grid place-items-center">
+                <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 py-1 shadow-sm">
+                  <EmptyState
+                    density="inline"
+                    title="No activity yet."
+                    body="Open a PR or push a commit to start your trail."
+                    secondary={
+                      <a
+                        href="#"
+                        className="font-mono text-[10px] uppercase tracking-[0.18em] underline decoration-dotted decoration-[var(--color-accent-2)] underline-offset-2 hover:text-[var(--color-text)]"
+                      >
+                        what counts as activity?
+                      </a>
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Error overlay — fullscreen ErrorState; grid sits at 40% opacity beneath. */}
+            {isError && !loading && (
+              <div className="pointer-events-auto absolute inset-0 grid place-items-center">
+                <ErrorState
+                  variant="fullscreen"
+                  title="Activity unavailable."
+                  body="Showing 7-day cache. We'll retry automatically."
+                  lastSync="02:14"
+                  onRetry={() => {
+                    window.location.hash = "";
+                    setMode("live");
+                  }}
+                />
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Toggle row — year pills (left) + range pills (right). */}
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <PillGroup
-            options={YEARS.map((y) => ({ id: y.id, label: y.id }))}
-            value={year}
-            onChange={(v) => setYear(v as "2025" | "2026")}
-            ariaLabel="Year"
-          />
-          <PillGroup
-            options={RANGES.map((r) => ({ id: r.id, label: r.id }))}
-            value={rangeId}
-            onChange={(v) => setRangeId(v as "12W" | "26W" | "52W")}
-            ariaLabel="Range"
-          />
-        </div>
-
-        {/* Heatmap SVG. */}
-        <div className="-mx-1 overflow-x-auto pb-1">
-        <svg
-          ref={svgRef}
-          viewBox={`0 0 ${totalWidth} ${totalHeight}`}
-          className="block w-full focus:outline-none"
-          style={{ minWidth: 680, touchAction: "none" }}
-          role="img"
-          aria-label={`Contribution heatmap. ${total} total contributions across ${weeksToShow} weeks; peak day ${max}.`}
-          tabIndex={0}
-          data-focus-ring="off"
-          onKeyDown={onKeyDown}
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
+        {/* Help text — referenced by aria-describedby. */}
+        <p
+          id="heatmap-help"
+          className="sr-only"
         >
-          {/* Month labels above the grid. */}
-          <g transform={`translate(${dayLabelGutter} 0)`}>
-            {MONTHS.map((m, i) => {
-              const x = (i / 12) * gridWidth;
-              return (
-                <text
-                  key={m}
-                  x={x}
-                  y={monthLabelHeight - 5}
-                  className="fill-[var(--color-text-muted)]"
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 9,
-                    letterSpacing: "0.18em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  {m}
-                </text>
-              );
-            })}
-          </g>
-
-          {/* Day labels. */}
-          <g transform={`translate(0 ${monthLabelHeight})`}>
-            {DAY_LABELS.map(({ index, label }) => (
-              <text
-                key={label}
-                x={0}
-                y={index * STEP + STEP - 3}
-                className="fill-[var(--color-text-muted)]"
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 9,
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                }}
-              >
-                {label}
-              </text>
-            ))}
-          </g>
-
-          {/* Heatmap cells — wrapped in a swap-faded group. */}
-          <g
-            transform={`translate(${dayLabelGutter} ${monthLabelHeight})`}
-            style={{
-              opacity: swapping ? 0 : 1,
-              transition: "opacity 200ms ease-out",
-            }}
-          >
-            {cells.map((c) => {
-              const r = radiusFor(c.value, max);
-              const tx = c.week * STEP;
-              const ty = c.day * STEP;
-              const label = describeCell(c);
-              const dimmed = range != null && !inRange(c);
-              return (
-                <g
-                  key={`${c.week}-${c.day}`}
-                  role="img"
-                  aria-label={label}
-                  transform={`translate(${tx} ${ty})`}
-                  onMouseEnter={() => setHovered(c)}
-                  onMouseLeave={() =>
-                    setHovered((prev) =>
-                      prev && prev.week === c.week && prev.day === c.day
-                        ? null
-                        : prev,
-                    )
-                  }
-                >
-                  <rect
-                    width={CELL}
-                    height={CELL}
-                    fill="transparent"
-                    pointerEvents="all"
-                  />
-                  <circle
-                    cx={CELL / 2}
-                    cy={CELL / 2}
-                    r={r}
-                    fill="var(--color-dot-ink)"
-                    style={{
-                      fillOpacity: dimmed ? 0.35 : 1,
-                      transition: "fill-opacity 200ms ease-out",
-                    }}
-                  />
-                </g>
-              );
-            })}
-
-            {/* Pinned ring — opacity-only animated. */}
-            {pinned && (
-              <rect
-                key={`pin-${pinned.week}-${pinned.day}`}
-                x={pinned.week * STEP - 0.5}
-                y={pinned.day * STEP - 0.5}
-                width={CELL + 1}
-                height={CELL + 1}
-                fill="none"
-                stroke="var(--color-accent-2)"
-                strokeWidth={1}
-                rx={2}
-                style={{
-                  opacity: 1,
-                  transition: "opacity 120ms ease-out",
-                }}
-              />
-            )}
-
-            {/* Focus rect — walnut, 1px. */}
-            {focusCell && (
-              <rect
-                x={focusCell.week * STEP - 0.5}
-                y={focusCell.day * STEP - 0.5}
-                width={CELL + 1}
-                height={CELL + 1}
-                fill="none"
-                stroke="var(--color-text)"
-                strokeWidth={1}
-                strokeDasharray="2 1.5"
-                opacity={0.65}
-                rx={2}
-              />
-            )}
-          </g>
-
-          {/* Legend — calibrated area scale. */}
-          <g
-            transform={`translate(${dayLabelGutter} ${
-              monthLabelHeight + gridHeight + legendGap
-            })`}
-          >
-            <text
-              x={0}
-              y={CELL - 1}
-              className="fill-[var(--color-text-muted)]"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                letterSpacing: "0.12em",
-              }}
-            >
-              0
-            </text>
-            {[0, 0.25, 0.5, 0.75, 1].map((norm, i) => {
-              const r = radiusFor(norm, 1);
-              return (
-                <g
-                  key={i}
-                  transform={`translate(${22 + i * (CELL + 3)} 0)`}
-                >
-                  <circle
-                    cx={CELL / 2}
-                    cy={CELL / 2}
-                    r={r}
-                    fill="var(--color-dot-ink)"
-                  />
-                </g>
-              );
-            })}
-            <text
-              x={22 + 5 * (CELL + 3) + 5}
-              y={CELL - 1}
-              className="fill-[var(--color-text-muted)]"
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                letterSpacing: "0.12em",
-              }}
-            >
-              {max} / day
-            </text>
-          </g>
-
-          {/* Custom tooltip. */}
-          <CellTooltipFader
-            hovered={tooltipCell}
-            dayLabelGutter={dayLabelGutter}
-            monthLabelHeight={monthLabelHeight}
-            totalWidth={totalWidth}
-            gridHeight={gridHeight}
-          />
-        </svg>
-        </div>
+          Use arrow keys to navigate the contribution grid; Enter pins a cell; T jumps to today.
+        </p>
 
         {/* Footer caption — italic Fraunces. */}
         <p
@@ -537,7 +702,11 @@ export default function ActivityHeatmap() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          {range ? (
+          {isEmpty ? (
+            <>Day 0 of your trail. Push something.</>
+          ) : isError ? (
+            <>Last successful sync 02:14 — display reflects that snapshot.</>
+          ) : range ? (
             <>
               {rangeStartLabel} → {rangeEndLabel} · {rangeContribs.toLocaleString()} contributions
               <span className="ml-2 not-italic font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
@@ -561,6 +730,48 @@ export default function ActivityHeatmap() {
         </p>
       </div>
     </div>
+  );
+}
+
+function SkeletonGrid({
+  weeksToShow,
+  dayLabelGutter,
+  monthLabelHeight,
+  gridWidth,
+  totalWidth,
+  totalHeight,
+}: {
+  weeksToShow: number;
+  dayLabelGutter: number;
+  monthLabelHeight: number;
+  gridWidth: number;
+  totalWidth: number;
+  totalHeight: number;
+}) {
+  // The skeleton sits in the same SVG geometry as the live grid so the
+  // crossfade is geometrically aligned. Density 0.06 — barely there.
+  return (
+    <svg
+      viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+      className="block w-full"
+      aria-hidden
+    >
+      <g transform={`translate(${dayLabelGutter} ${monthLabelHeight})`}>
+        {Array.from({ length: weeksToShow }).map((_, w) =>
+          Array.from({ length: DAYS }).map((__, d) => (
+            <rect
+              key={`${w}-${d}`}
+              x={w * STEP}
+              y={d * STEP}
+              width={CELL}
+              height={CELL}
+              rx={1.5}
+              fill="color-mix(in oklch, var(--color-text-muted) 8%, transparent)"
+            />
+          )),
+        )}
+      </g>
+    </svg>
   );
 }
 
@@ -592,8 +803,8 @@ function PillGroup({
             onClick={() => onChange(o.id)}
             className={
               active
-                ? "h-6 rounded-[var(--radius-xs)] bg-[var(--color-bg)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text)] shadow-[inset_0_0_0_1px_var(--color-border)]"
-                : "h-6 rounded-[var(--radius-xs)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                ? "h-6 rounded-[var(--radius-xs)] bg-[var(--color-bg)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text)] shadow-[inset_0_0_0_1px_var(--color-border)] transition-colors duration-[120ms] ease-out"
+                : "h-6 rounded-[var(--radius-xs)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] transition-colors duration-[120ms] ease-out hover:text-[var(--color-text)]"
             }
           >
             {o.label}

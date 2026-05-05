@@ -22,6 +22,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
 import { mulberry32 } from "@/components/_kit/dot-noise";
 import { useToast } from "@/components/_kit/toast";
+import { Skeleton } from "@/components/_kit/skeleton";
+import { EmptyState } from "@/components/_kit/empty-state";
+import { ErrorState } from "@/components/_kit/error-state";
 import { cn } from "@/lib/cn";
 
 type EnvKey = "dev" | "staging" | "prod";
@@ -215,6 +218,23 @@ export default function FeatureFlags() {
   const [selectedKey, setSelectedKey] = useState<string>(INITIAL_FLAGS[0].key);
   const { toast } = useToast();
 
+  // Loading + error scaffold. The plate is purely client-side, so we mock a
+  // boot fetch to give the skeleton + retry surfaces something to attach to.
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [auditAnnounce, setAuditAnnounce] = useState("");
+
+  // 2-step kill confirm — first click arms, second click commits. Auto-revert
+  // after 4s if the user steps away.
+  const [killArmed, setKillArmed] = useState(false);
+  const killTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setLoading(false), 320);
+    return () => window.clearTimeout(t);
+  }, []);
+
   const selected = flags.find((f) => f.key === selectedKey) ?? flags[0];
 
   const evalTrace = useMemo(
@@ -256,12 +276,21 @@ export default function FeatureFlags() {
     const clamped = Math.max(0, Math.min(100, Math.round(pct / 5) * 5));
     if (clamped === selected.rolloutPct) return;
     const prev = selected.rolloutPct;
+    // 8% simulated failure — revert local change.
+    if (Math.random() < 0.08) {
+      setSaveError(true);
+      toast({ title: "Couldn't save flag", status: "error" });
+      return;
+    }
+    setSaveError(false);
     setFlags((all) =>
       all.map((f) =>
         f.key === selected.key ? { ...f, rolloutPct: clamped } : f,
       ),
     );
-    logAudit(selected.key, `rollout ${prev} → ${clamped}%`);
+    const change = `rollout ${prev} → ${clamped}%`;
+    logAudit(selected.key, change);
+    setAuditAnnounce(`Audit: ${change}.`);
     toast({ title: "Flag updated", status: "success" });
   }
 
@@ -269,6 +298,12 @@ export default function FeatureFlags() {
     if (selected.killed) return;
     const cur = selected.envState[env];
     const next = STATE_NEXT[cur];
+    if (Math.random() < 0.08) {
+      setSaveError(true);
+      toast({ title: "Couldn't save flag", status: "error" });
+      return;
+    }
+    setSaveError(false);
     setFlags((all) =>
       all.map((f) =>
         f.key === selected.key
@@ -276,26 +311,55 @@ export default function FeatureFlags() {
           : f,
       ),
     );
-    logAudit(selected.key, `${env} ${cur} → ${next}`);
+    const change = `${env} ${cur} → ${next}`;
+    logAudit(selected.key, change);
+    setAuditAnnounce(`Audit: ${change}.`);
     toast({ title: "Flag updated", status: "success" });
   }
 
-  function toggleKill() {
+  function clearKillTimer() {
+    if (killTimerRef.current) {
+      clearTimeout(killTimerRef.current);
+      killTimerRef.current = null;
+    }
+  }
+
+  function armOrCommitKill() {
+    if (selected.killed) {
+      // Reviving doesn't need a confirm step.
+      doKillToggle();
+      return;
+    }
+    if (!killArmed) {
+      setKillArmed(true);
+      clearKillTimer();
+      killTimerRef.current = setTimeout(() => setKillArmed(false), 4000);
+      return;
+    }
+    clearKillTimer();
+    setKillArmed(false);
+    doKillToggle();
+  }
+
+  function doKillToggle() {
     const willKill = !selected.killed;
     setFlags((all) =>
       all.map((f) =>
         f.key === selected.key ? { ...f, killed: willKill } : f,
       ),
     );
-    logAudit(selected.key, willKill ? "killed" : "revived");
+    const change = willKill ? "killed" : "revived";
+    logAudit(selected.key, change);
+    setAuditAnnounce(`Audit: ${change}.`);
     toast({ title: "Flag updated", status: "success" });
   }
 
+  // Whole-workspace empty path — no flags at all.
+  const noFlags = flags.length === 0;
+
   return (
     <div className="flex h-full w-full flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
-      {/* Plate hero — Fraunces italic, the only display heading on the plate.
-          Sits above the two-pane shell so the focused flag's title can read
-          as a section h2 instead of impersonating the plate hero. */}
+      {/* Plate hero. */}
       <div className="shrink-0 border-b border-[var(--color-border)] px-6 pb-3 pt-4">
         <h1
           className="font-display text-[28px] italic leading-tight tracking-[-0.02em] text-[var(--color-text)]"
@@ -304,21 +368,69 @@ export default function FeatureFlags() {
           Feature flags.
         </h1>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-[280px_1fr]">
-        <FlagList
-          flags={flags}
-          selectedKey={selectedKey}
-          onSelect={setSelectedKey}
+
+      {/* SR-only live region for audit announcements. */}
+      <span aria-live="polite" className="sr-only">
+        {auditAnnounce}
+      </span>
+
+      {/* Boot loading state. */}
+      {loading && <FeatureFlagsSkeleton />}
+
+      {!loading && fetchError && (
+        <ErrorState
+          variant="banner"
+          title="Flags couldn't load."
+          onRetry={() => setFetchError(false)}
         />
-        <FlagDetail
-          flag={selected}
-          evalTrace={evalTrace}
-          freshIds={freshIdsRef.current}
-          onSetRollout={setRollout}
-          onCycleCell={cycleCell}
-          onToggleKill={toggleKill}
-        />
-      </div>
+      )}
+
+      {!loading && !fetchError && noFlags && (
+        <div className="grid min-h-0 flex-1 place-items-center">
+          <EmptyState
+            title="No feature flags yet."
+            body="Define a flag in code, deploy, and it'll appear here."
+            action={{
+              label: "Read the SDK guide",
+              onClick: () => toast({ title: "SDK guide", status: "info" }),
+            }}
+          />
+        </div>
+      )}
+
+      {!loading && !fetchError && !noFlags && (
+        <>
+          {saveError && (
+            <ErrorState
+              variant="banner"
+              title="Save failed."
+              onRetry={() => setSaveError(false)}
+              onDismiss={() => setSaveError(false)}
+            />
+          )}
+          {/* >=md: 2-pane; <md: stacked, list as horizontal pill scroller. */}
+          <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+            <FlagList
+              flags={flags}
+              selectedKey={selectedKey}
+              onSelect={(k) => {
+                setSelectedKey(k);
+                clearKillTimer();
+                setKillArmed(false);
+              }}
+            />
+            <FlagDetail
+              flag={selected}
+              evalTrace={evalTrace}
+              freshIds={freshIdsRef.current}
+              onSetRollout={setRollout}
+              onCycleCell={cycleCell}
+              onToggleKill={armOrCommitKill}
+              killArmed={killArmed}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -335,27 +447,61 @@ function FlagList({
   onSelect: (k: string) => void;
 }) {
   return (
-    <div className="flex h-full min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
-      <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] px-4 py-2">
-        <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-          Flags · {flags.length}
-        </span>
-        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
-          live
-        </span>
+    <>
+      {/* Mobile: horizontal pill scroller across the top. */}
+      <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-2 md:hidden">
+        {flags.map((f) => {
+          const active = f.key === selectedKey;
+          return (
+            <button
+              key={f.key}
+              type="button"
+              onClick={() => onSelect(f.key)}
+              aria-pressed={active}
+              className={cn(
+                "inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-xs)] border px-2 py-1 transition-[border-color,background-color] duration-[120ms] ease-out",
+                active
+                  ? "border-[var(--color-accent-2)] bg-[color-mix(in_oklch,var(--color-accent-2)_8%,transparent)]"
+                  : "border-[var(--color-border)] bg-transparent",
+              )}
+            >
+              <span
+                className={cn(
+                  "max-w-[140px] truncate font-mono text-[11px]",
+                  f.killed ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-text)]",
+                )}
+              >
+                {f.key}
+              </span>
+              <RolloutPill pct={f.rolloutPct} killed={f.killed} />
+            </button>
+          );
+        })}
       </div>
-      <ul className="min-h-0 flex-1 overflow-y-auto py-1">
-        {flags.map((f) => (
-          <FlagListItem
-            key={f.key}
-            flag={f}
-            selected={f.key === selectedKey}
-            onSelect={() => onSelect(f.key)}
-          />
-        ))}
-      </ul>
-      <FlagListLegend />
-    </div>
+
+      {/* >=md: vertical list pane. */}
+      <div className="hidden h-full min-h-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] md:flex">
+        <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] px-4 py-2">
+          <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+            Flags · {flags.length}
+          </span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            live
+          </span>
+        </div>
+        <ul className="min-h-0 flex-1 overflow-y-auto py-1">
+          {flags.map((f) => (
+            <FlagListItem
+              key={f.key}
+              flag={f}
+              selected={f.key === selectedKey}
+              onSelect={() => onSelect(f.key)}
+            />
+          ))}
+        </ul>
+        <FlagListLegend />
+      </div>
+    </>
   );
 }
 
@@ -512,6 +658,7 @@ function FlagDetail({
   onSetRollout,
   onCycleCell,
   onToggleKill,
+  killArmed,
 }: {
   flag: Flag;
   evalTrace: TracePoint[];
@@ -519,6 +666,7 @@ function FlagDetail({
   onSetRollout: (pct: number) => void;
   onCycleCell: (env: EnvKey) => void;
   onToggleKill: () => void;
+  killArmed: boolean;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -530,18 +678,22 @@ function FlagDetail({
         <button
           type="button"
           onClick={onToggleKill}
+          aria-pressed={killArmed}
           className={cn(
             "inline-flex h-6 items-center rounded-[var(--radius-xs)] border px-2 font-mono text-[10px] uppercase tracking-[0.18em]",
+            "transition-[border-color,color,background-color] duration-[200ms] ease-out",
             flag.killed
               ? "border-[var(--color-border-strong)] text-[var(--color-text)]"
-              : "border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[color-mix(in_oklch,var(--color-accent)_6%,transparent)]",
+              : killArmed
+                ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+                : "border-[var(--color-accent)] text-[var(--color-accent)] hover:bg-[color-mix(in_oklch,var(--color-accent)_6%,transparent)]",
           )}
         >
-          {/* Encoding: persimmon-bordered chip + persimmon ink. The earlier
-              version added a third channel (a leading dot) — dropped, since
-              border + ink already carries the state and "kill" is unique
-              enough as a word. */}
-          {flag.killed ? "killed · revive" : "kill switch"}
+          {flag.killed
+            ? "killed · revive"
+            : killArmed
+              ? "kill — sure?"
+              : "kill switch"}
         </button>
       </div>
 
@@ -553,8 +705,9 @@ function FlagDetail({
           {flag.description}
         </p>
 
-        {/* Env matrix + rollout */}
-        <div className="mt-4 grid grid-cols-[1fr_1fr] gap-6">
+        {/* Env matrix + rollout — stacked at <lg, two-col at lg+ (matrix +
+            slider only fit side-by-side in the wider breakpoint). */}
+        <div className="mt-4 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1fr]">
           <EnvMatrix
             envState={flag.envState}
             killed={flag.killed}
@@ -588,11 +741,15 @@ function FlagDetail({
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
             Recent changes
           </div>
-          <ul className="mt-2">
-            {flag.audit.map((a) => (
-              <AuditRow key={a.id} entry={a} fresh={freshIds.has(a.id)} />
-            ))}
-          </ul>
+          {flag.audit.length === 0 ? (
+            <EmptyState density="inline" title="No changes recorded." />
+          ) : (
+            <ul className="mt-2">
+              {flag.audit.map((a) => (
+                <AuditRow key={a.id} entry={a} fresh={freshIds.has(a.id)} />
+              ))}
+            </ul>
+          )}
         </div>
       </div>
     </div>
@@ -664,6 +821,7 @@ function RowOfMatrix({
             type="button"
             onClick={() => onCycle(e.key)}
             disabled={killed}
+            aria-pressed={active}
             className={cn(
               "grid h-8 place-items-center rounded-[var(--radius-xs)] border",
               active
@@ -674,7 +832,7 @@ function RowOfMatrix({
             style={{
               transition: `border-color 120ms ease-out, opacity 120ms ease-out`,
             }}
-            aria-label={`${e.label} ${label}${active ? " (active)" : ""}`}
+            aria-label={`${e.label} ${label}`}
           >
             {/* Inactive cells previously had `box-shadow: inset 0 0 0 1px` AND
                 the outer border — two perimeters. Outer border alone now. */}
@@ -914,6 +1072,41 @@ function EvalTrace({ data, killed }: { data: TracePoint[]; killed: boolean }) {
       <div className="mt-1 flex justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
         <span>14d ago</span>
         <span>today</span>
+      </div>
+    </div>
+  );
+}
+
+function FeatureFlagsSkeleton() {
+  return (
+    <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
+      {/* Left pane: 8 row-shaped skeletons. */}
+      <div className="hidden flex-col gap-2 border-r border-[var(--color-border)] bg-[var(--color-surface)] p-3 md:flex">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <Skeleton
+            key={i}
+            width={240}
+            height={60}
+            density={0.05}
+            seed={11 + i}
+            className="h-[60px] w-full"
+          />
+        ))}
+      </div>
+      {/* Right pane: select-a-flag placeholder + trace stipple. */}
+      <div className="flex min-h-0 flex-col p-6">
+        <p className="text-[12px] italic text-[var(--color-text-muted)]">
+          Select a flag.
+        </p>
+        <div className="mt-4 h-[48px] w-full max-w-[520px]">
+          <Skeleton
+            width={520}
+            height={48}
+            density={0.05}
+            seed={31}
+            className="h-full w-full"
+          />
+        </div>
       </div>
     </div>
   );

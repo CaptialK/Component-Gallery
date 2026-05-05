@@ -5,6 +5,10 @@ import { mulberry32 } from "@/components/_kit/dot-noise";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
 import { Modal } from "@/components/_kit/modal";
 import { useToast } from "@/components/_kit/toast";
+import { Skeleton } from "@/components/_kit/skeleton";
+import { EmptyState } from "@/components/_kit/empty-state";
+import { ErrorState } from "@/components/_kit/error-state";
+import { cn } from "@/lib/cn";
 
 /**
  * Deploy pipeline — three env lanes (preview / staging / production).
@@ -208,6 +212,16 @@ function authorFor(d: Deploy): { initials: string; name: string } {
 
 const ALL_STATUSES: DeployStatus[] = ["ok", "fail", "rolled-back", "live"];
 
+const PAPER_EASE_DEPLOY = "cubic-bezier(0.32, 0.72, 0, 1)";
+
+type PromoteArc = {
+  fromX: number;
+  fromTop: number;
+  toTop: number;
+  sha: string;
+  outcome: "ok" | "fail";
+};
+
 export default function DeployPipeline() {
   const [hovered, setHovered] = useState<{ deploy: Deploy; lane: Lane } | null>(null);
   const [selected, setSelected] = useState<{ deploy: Deploy; lane: Lane } | null>(null);
@@ -216,13 +230,35 @@ export default function DeployPipeline() {
   const [focusEnv, setFocusEnv] = useState<Lane["env"] | null>(null);
   const [swapping, setSwapping] = useState(false);
 
+  // Loading / error / first-paint plumbing.
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState(false);
+  const [firstPaint, setFirstPaint] = useState(false);
+
+  // Lane refs for computing promote-arc geometry from real layout.
+  const laneRefs = useRef<Map<Lane["env"], HTMLLIElement | null>>(new Map());
+  const setLaneRef = (env: Lane["env"]) => (node: HTMLLIElement | null) => {
+    laneRefs.current.set(env, node);
+  };
+
+  // Live-region announce for keyboard/screen-reader focus on a deploy.
+  const [announce, setAnnounce] = useState<string>("");
+
+  // Inline two-step rollback confirm.
+  const [rollbackConfirm, setRollbackConfirm] = useState(false);
+
   // Promote-arc ghost dot.
-  const [promoteArc, setPromoteArc] = useState<{
-    fromX: number;
-    yStart: number;
-    yEnd: number;
-    sha: string;
-  } | null>(null);
+  const [promoteArc, setPromoteArc] = useState<PromoteArc | null>(null);
+
+  // Boot: short skeleton, then reveal lanes with a sequential opacity fade-in.
+  useEffect(() => {
+    const t1 = window.setTimeout(() => setLoading(false), 320);
+    const t2 = window.setTimeout(() => setFirstPaint(true), 320 + 30);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, []);
 
   const baseLanes = useMemo(() => buildLanes(windowId), [windowId]);
   // We append "promoted" deploys to production at runtime.
@@ -250,26 +286,39 @@ export default function DeployPipeline() {
     setExtraProdDeploys([]);
   };
 
-  const { toast } = useToast();
+  const { toast, update: updateToast } = useToast();
 
   const onPromote = (deploy: Deploy, lane: Lane) => {
     if (lane.env !== "staging") return;
-    // Compute SVG positions in the lane geometry.
+    // Guard: an ongoing promote already owns the ghost arc.
+    if (promoteArc !== null) return;
+    // Compute geometry from real lane DOM rather than a magic 72px constant.
+    const stagingNode = laneRefs.current.get("staging");
+    const prodNode = laneRefs.current.get("production");
+    let fromTop = 0;
+    let toTop = 72;
+    if (stagingNode && prodNode) {
+      const sRect = stagingNode.getBoundingClientRect();
+      const pRect = prodNode.getBoundingClientRect();
+      // The ghost is rendered inside the production lane, so its y=0 origin is
+      // pRect.top. fromTop is the staging center relative to that origin.
+      fromTop = sRect.top + sRect.height / 2 - (pRect.top + pRect.height / 2);
+      toTop = 0;
+    }
     const W = 720;
     const padX = 8;
     const innerW = W - padX * 2;
     const cx = padX + deploy.t * innerW;
-    // yStart = staging center, yEnd = production center. Strip rows are 36px
-    // tall in user-space; we approximate jump distance in the same coordinate
-    // system as a fraction of the lane height. In practice the ghost element
-    // lives in DOM (absolute-positioned) so we measure the production lane's
-    // top relative to the staging lane.
-    setPromoteArc({ fromX: cx, yStart: 0, yEnd: 1, sha: deploy.sha });
-    // Toast loading.
+    // 10% simulated failure for promote.
+    const willFail = Math.random() < 0.1;
+    setPromoteArc({ fromX: cx, fromTop, toTop, sha: deploy.sha, outcome: willFail ? "fail" : "ok" });
     const id = toast({ title: `Promoting ${deploy.sha} → production…`, status: "loading" });
     window.setTimeout(() => {
       setPromoteArc(null);
-      // Append a live deploy to production at t≈0.95.
+      if (willFail) {
+        updateToast(id, { title: "Promotion failed.", status: "error" });
+        return;
+      }
       const newLive: Deploy = {
         t: 0.95,
         status: "live",
@@ -279,15 +328,33 @@ export default function DeployPipeline() {
         branch: "main",
       };
       setExtraProdDeploys((prev) => [...prev, newLive]);
-      toast({ id, title: `Promoted ${deploy.sha} → production`, status: "success" });
+      updateToast(id, { title: `Promoted ${deploy.sha} → production`, status: "success" });
     }, 320);
     setSelected(null);
   };
 
   const onRollback = (deploy: Deploy) => {
+    if (deploy.status === "rolled-back") return;
+    if (!rollbackConfirm) {
+      setRollbackConfirm(true);
+      window.setTimeout(() => setRollbackConfirm(false), 4000);
+      return;
+    }
+    setRollbackConfirm(false);
     toast({ title: `Rolled back ${deploy.sha}`, status: "info" });
     setSelected(null);
   };
+
+  // Modal placement: bottom-sheet at narrow widths, right-side panel otherwise.
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const m = window.matchMedia("(max-width: 640px)");
+    const apply = () => setNarrow(m.matches);
+    apply();
+    m.addEventListener("change", apply);
+    return () => m.removeEventListener("change", apply);
+  }, []);
 
   return (
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -311,43 +378,79 @@ export default function DeployPipeline() {
         {/* Filterable legend strip. */}
         <FilterableLegend visible={visible} setVisible={setVisible} />
 
-        {/* Three env lanes. */}
-        <ul
-          className="grid min-h-0 flex-1 divide-y divide-[var(--color-border)] transition-[opacity] duration-[200ms]"
-          style={{
-            opacity: swapping ? 0 : 1,
-            gridTemplateRows: lanes
-              .map((l) =>
-                focusEnv === null
-                  ? "1fr"
-                  : focusEnv === l.env
-                    ? "3fr"
-                    : "0.4fr",
-              )
-              .join(" "),
-            transitionProperty: "opacity, grid-template-rows",
-            transitionDuration: "200ms",
-          }}
-        >
-          {lanes.map((lane) => (
-            <LaneRow
-              key={lane.env}
-              lane={lane}
-              hovered={hovered}
-              setHovered={setHovered}
-              setSelected={setSelected}
-              visible={visible}
-              focused={focusEnv === lane.env}
-              dimmed={focusEnv !== null && focusEnv !== lane.env}
-              onToggleFocus={() =>
-                setFocusEnv((prev) => (prev === lane.env ? null : lane.env))
-              }
-              promoteArc={lane.env === "production" ? promoteArc : null}
-            />
-          ))}
-        </ul>
+        {/* Fetch error banner — sits above lanes when present. */}
+        {fetchError && (
+          <ErrorState
+            variant="banner"
+            title="Couldn't load deploys."
+            onRetry={() => setFetchError(false)}
+          />
+        )}
 
-        <TimeAxis windowId={windowId} />
+        {/* SR-only live region for keyboard focus on a deploy dot. */}
+        <span aria-live="polite" className="sr-only">
+          {announce}
+        </span>
+
+        {/* Loading state — three lane skeletons. */}
+        {loading && !fetchError && <DeployPipelineSkeleton />}
+
+        {/* Whole-pipeline empty (zero deploys across every lane). */}
+        {!loading && !fetchError && lanes.every((l) => l.deploys.length === 0) && (
+          <div className="grid min-h-0 flex-1 place-items-center">
+            <EmptyState
+              title="No deploys yet."
+              body="Push to a branch to start."
+              action={{
+                label: "View integrations",
+                onClick: () => toast({ title: "Integrations panel", status: "info" }),
+              }}
+            />
+          </div>
+        )}
+
+        {/* Three env lanes. */}
+        {!loading && !fetchError && lanes.some((l) => l.deploys.length > 0) && (
+          <ul
+            className="grid min-h-0 flex-1 divide-y divide-[var(--color-border)] transition-[opacity] duration-[200ms]"
+            style={{
+              opacity: swapping ? 0 : 1,
+              gridTemplateRows: lanes
+                .map((l) =>
+                  focusEnv === null
+                    ? "1fr"
+                    : focusEnv === l.env
+                      ? "3fr"
+                      : "0.4fr",
+                )
+                .join(" "),
+              transitionProperty: "opacity, grid-template-rows",
+              transitionDuration: "200ms",
+            }}
+          >
+            {lanes.map((lane) => (
+              <LaneRow
+                key={lane.env}
+                lane={lane}
+                hovered={hovered}
+                setHovered={setHovered}
+                setSelected={setSelected}
+                visible={visible}
+                focused={focusEnv === lane.env}
+                dimmed={focusEnv !== null && focusEnv !== lane.env}
+                onToggleFocus={() =>
+                  setFocusEnv((prev) => (prev === lane.env ? null : lane.env))
+                }
+                promoteArc={lane.env === "production" ? promoteArc : null}
+                firstPaint={firstPaint}
+                onAnnounce={setAnnounce}
+                laneRef={setLaneRef(lane.env)}
+              />
+            ))}
+          </ul>
+        )}
+
+        {!loading && !fetchError && <TimeAxis windowId={windowId} />}
 
         <p
           className="border-t border-[var(--color-border)] px-6 py-2 text-center text-[11px] italic text-[var(--color-text-muted)]"
@@ -362,13 +465,16 @@ export default function DeployPipeline() {
         </p>
       </div>
 
-      {/* Side detail Modal */}
+      {/* Side detail Modal — bottom sheet on narrow viewports. */}
       <Modal
         open={selected !== null}
         onOpenChange={(next) => {
-          if (!next) setSelected(null);
+          if (!next) {
+            setSelected(null);
+            setRollbackConfirm(false);
+          }
         }}
-        placement="right"
+        placement={narrow ? "bottom" : "right"}
         size="md"
         ariaLabel={selected ? `Deploy ${selected.deploy.sha}` : "Deploy detail"}
       >
@@ -377,7 +483,12 @@ export default function DeployPipeline() {
             selected={selected}
             onPromote={() => onPromote(selected.deploy, selected.lane)}
             onRollback={() => onRollback(selected.deploy)}
-            onClose={() => setSelected(null)}
+            onClose={() => {
+              setSelected(null);
+              setRollbackConfirm(false);
+            }}
+            rollbackConfirm={rollbackConfirm}
+            promoteFailed={promoteArc?.outcome === "fail"}
           />
         )}
       </Modal>
@@ -509,6 +620,9 @@ function LaneRow({
   dimmed,
   onToggleFocus,
   promoteArc,
+  firstPaint,
+  onAnnounce,
+  laneRef,
 }: {
   lane: Lane;
   hovered: { deploy: Deploy; lane: Lane } | null;
@@ -518,7 +632,10 @@ function LaneRow({
   focused: boolean;
   dimmed: boolean;
   onToggleFocus: () => void;
-  promoteArc: { fromX: number; yStart: number; yEnd: number; sha: string } | null;
+  promoteArc: PromoteArc | null;
+  firstPaint: boolean;
+  onAnnounce: (s: string) => void;
+  laneRef: (node: HTMLLIElement | null) => void;
 }) {
   const W = 720;
   const H = 36;
@@ -531,18 +648,27 @@ function LaneRow({
   if (isLaneHover) lastRef.current = hovered.deploy;
   const tooltipDeploy = isLaneHover ? hovered.deploy : lastRef.current;
 
+  // Per-lane empty (e.g. preview has 0 deploys but staging is populated).
+  const laneEmpty = lane.deploys.length === 0;
+
   return (
     <li
-      className="grid grid-cols-[132px_1fr_120px] items-center gap-4 px-6 py-3 transition-[opacity] duration-[200ms]"
+      ref={laneRef}
+      className={cn(
+        "px-6 py-3 transition-[opacity] duration-[200ms]",
+        // Stacked at <640, 3-col grid otherwise; right gutter shrinks at the
+        // 768 breakpoint via lg width.
+        "flex flex-col gap-2 sm:grid sm:grid-cols-[132px_1fr_100px] sm:items-center sm:gap-4 lg:grid-cols-[132px_1fr_120px]",
+      )}
       style={{
         opacity: dimmed ? 0.4 : 1,
       }}
     >
-      <div className="leading-tight">
+      <div className="flex items-baseline gap-2 leading-tight sm:block">
         <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text)]">
           {lane.label}
         </div>
-        <div className="mt-1 font-mono text-[10px] tracking-tight text-[var(--color-text-muted)]">
+        <div className="truncate font-mono text-[10px] tracking-tight text-[var(--color-text-muted)] sm:mt-1">
           {lane.branchRef}
         </div>
       </div>
@@ -578,8 +704,38 @@ function LaneRow({
             />
           ))}
 
+          {/* Per-lane empty: dashed rule + caption inside the lane area. */}
+          {laneEmpty && (
+            <>
+              <line
+                x1={padX}
+                x2={W - padX}
+                y1={yDot}
+                y2={yDot}
+                stroke="var(--color-text-muted)"
+                strokeWidth={0.8}
+                strokeDasharray="3 4"
+                opacity={0.5}
+              />
+              <text
+                x={W / 2}
+                y={yDot - 6}
+                textAnchor="middle"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 9,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  fill: "var(--color-text-muted)",
+                }}
+              >
+                no {lane.env} deploys
+              </text>
+            </>
+          )}
+
           {/* Trails */}
-          {lane.deploys.map((d, i) => {
+          {!laneEmpty && lane.deploys.map((d, i) => {
             const cx = padX + d.t * innerW;
             const trailW = d.rollout * innerW;
             const x1 = Math.max(padX, cx - trailW);
@@ -612,14 +768,34 @@ function LaneRow({
             );
           })}
 
-          {/* Dots */}
-          {lane.deploys.map((d, i) => {
+          {/* Dots — sequential opacity fade-in over 200ms after first paint. */}
+          {!laneEmpty && lane.deploys.map((d, i) => {
             const cx = padX + d.t * innerW;
             const isVisible = visible.has(d.status);
-            const dotOpacity = isVisible ? 1 : 0.15;
+            // First-paint reveal: 0 → 1 over the lane (200ms total). Each dot
+            // fades opacity-only (never r/cx/cy) with a stagger by index.
+            const stagger = lane.deploys.length > 1 ? i / (lane.deploys.length - 1) : 0;
+            const enterOpacity = firstPaint ? (isVisible ? 1 : 0.15) : 0;
+            const dotOpacity = enterOpacity;
+            const enterDelay = `${Math.round(stagger * 200)}ms`;
             const onEnter = () => setHovered({ deploy: d, lane });
             const onLeave = () => setHovered(null);
             const onClick = () => setSelected({ deploy: d, lane });
+            const onFocus = () => {
+              setHovered({ deploy: d, lane });
+              const totalMin = Math.round(d.t * 24 * 60);
+              const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, "0");
+              const mm = String(totalMin % 60).padStart(2, "0");
+              onAnnounce(
+                `${lane.label} deploy ${d.sha}, ${STATUS_LABEL[d.status]}, at ${hh}:${mm}.`,
+              );
+            };
+            const onKey = (e: React.KeyboardEvent<SVGCircleElement>) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            };
             const hit = (
               <circle
                 cx={cx}
@@ -627,10 +803,16 @@ function LaneRow({
                 r={7}
                 fill="transparent"
                 pointerEvents="all"
+                tabIndex={0}
+                role="button"
+                aria-label={`${lane.label} deploy ${d.sha}, ${STATUS_LABEL[d.status]}`}
                 onMouseEnter={onEnter}
                 onMouseLeave={onLeave}
+                onFocus={onFocus}
+                onBlur={onLeave}
                 onClick={onClick}
-                style={{ cursor: "pointer" }}
+                onKeyDown={onKey}
+                style={{ cursor: "pointer", outline: "none" }}
               />
             );
             if (d.status === "live") {
@@ -639,7 +821,7 @@ function LaneRow({
                   key={`dot-${i}`}
                   style={{
                     opacity: dotOpacity,
-                    transition: "opacity 200ms ease-out",
+                    transition: `opacity 200ms ease-out ${enterDelay}`,
                   }}
                 >
                   <circle
@@ -667,7 +849,7 @@ function LaneRow({
                   key={`dot-${i}`}
                   style={{
                     opacity: dotOpacity,
-                    transition: "opacity 200ms ease-out",
+                    transition: `opacity 200ms ease-out ${enterDelay}`,
                   }}
                 >
                   <circle
@@ -711,33 +893,43 @@ function LaneRow({
           />
         </svg>
 
-        {/* Promote ghost dot — DOM overlay so it can translate from
-            the staging lane's vertical center DOWN to the production
-            lane's. We render the ghost on the production row so it
-            appears to land at the right destination. */}
-        {promoteArc && <PromoteGhost x={(promoteArc.fromX / W) * 100} top={yDot} />}
+        {/* Promote ghost dot — DOM overlay rendered inside the production
+            lane. fromTop/toTop are computed from real DOM rects so the arc
+            lands precisely on the production lane's center regardless of
+            layout / responsive stacking. */}
+        {promoteArc && (
+          <PromoteGhost
+            x={(promoteArc.fromX / W) * 100}
+            yDot={yDot}
+            fromTop={promoteArc.fromTop}
+            toTop={promoteArc.toTop}
+            outcome={promoteArc.outcome}
+          />
+        )}
 
-        <Trace
-          data={lane.frequency}
-          width={W}
-          height={18}
-          smooth
-          strokeColor="var(--color-text-muted)"
-          strokeWidth={0.8}
-          fill={{
-            kind: "below",
-            y: 0,
-            color:
-              "color-mix(in oklch, var(--color-text-muted) 14%, transparent)",
-          }}
-          margin={1}
-          className="block w-full"
-          ariaLabel={`${lane.label} deploy frequency`}
-        />
+        {!laneEmpty && (
+          <Trace
+            data={lane.frequency}
+            width={W}
+            height={18}
+            smooth
+            strokeColor="var(--color-text-muted)"
+            strokeWidth={0.8}
+            fill={{
+              kind: "below",
+              y: 0,
+              color:
+                "color-mix(in oklch, var(--color-text-muted) 14%, transparent)",
+            }}
+            margin={1}
+            className="block w-full"
+            ariaLabel={`${lane.label} deploy frequency`}
+          />
+        )}
       </div>
 
-      {/* Right gutter */}
-      <div className="flex flex-col items-end leading-tight">
+      {/* Right gutter — column on >=sm, footer row on stacked. */}
+      <div className="flex items-baseline justify-between gap-3 leading-tight sm:flex-col sm:items-end sm:justify-start">
         <button
           type="button"
           aria-pressed={focused}
@@ -921,11 +1113,15 @@ function DeployDetailPanel({
   onPromote,
   onRollback,
   onClose,
+  rollbackConfirm,
+  promoteFailed,
 }: {
   selected: { deploy: Deploy; lane: Lane };
   onPromote: () => void;
   onRollback: () => void;
   onClose: () => void;
+  rollbackConfirm: boolean;
+  promoteFailed: boolean;
 }) {
   const { deploy, lane } = selected;
   const author = authorFor(deploy);
@@ -955,6 +1151,13 @@ function DeployDetailPanel({
           esc
         </button>
       </div>
+      {promoteFailed && (
+        <ErrorState
+          variant="inline"
+          title="Promotion failed."
+          body="We rolled the deploy back automatically. No production traffic served."
+        />
+      )}
       <div className="grid flex-1 grid-cols-2 gap-4 px-5 py-4 text-xs">
         <Field label="Branch">{deploy.branch}</Field>
         <Field label="Time">{hh}:{mm} UTC</Field>
@@ -992,9 +1195,16 @@ function DeployDetailPanel({
           <button
             type="button"
             onClick={onRollback}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-xs text-[var(--color-text)]"
+            disabled={selected.deploy.status === "rolled-back"}
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border px-3 text-xs transition-[border-color,color,background-color] duration-[120ms] ease-out",
+              rollbackConfirm
+                ? "border-[var(--color-accent)] bg-[var(--color-accent)] text-[var(--color-accent-fg)]"
+                : "border-[var(--color-border-strong)] bg-[var(--color-surface)] text-[var(--color-text)]",
+              selected.deploy.status === "rolled-back" && "cursor-not-allowed opacity-50",
+            )}
           >
-            Rollback
+            {rollbackConfirm ? "Click again to confirm" : "Rollback"}
           </button>
         )}
         <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
@@ -1005,14 +1215,32 @@ function DeployDetailPanel({
   );
 }
 
-function PromoteGhost({ x, top }: { x: number; top: number }) {
-  // We use a transform-only animation via inline style + Web Animations API
-  // would be ideal, but a CSS transition driven by a state flip is simpler
-  // and works without keyframes. translateY goes from -72px → 0 over 320ms.
+function PromoteGhost({
+  x,
+  yDot,
+  fromTop,
+  toTop,
+  outcome,
+}: {
+  x: number;
+  yDot: number;
+  fromTop: number;
+  toTop: number;
+  outcome: "ok" | "fail";
+}) {
+  // Transform-only motion. translateY animates from `fromTop` (staging
+  // center, expressed relative to the production lane origin) to `toTop`
+  // (production center). On failure, the ghost lands and morphs into a
+  // persimmon X via opacity-only crossfade. We never animate r/cx/cy/d.
   const [arrived, setArrived] = useState(false);
+  const [landed, setLanded] = useState(false);
   useEffect(() => {
     const id = requestAnimationFrame(() => setArrived(true));
-    return () => cancelAnimationFrame(id);
+    const t = window.setTimeout(() => setLanded(true), 340);
+    return () => {
+      cancelAnimationFrame(id);
+      window.clearTimeout(t);
+    };
   }, []);
   return (
     <span
@@ -1020,18 +1248,60 @@ function PromoteGhost({ x, top }: { x: number; top: number }) {
       className="pointer-events-none absolute"
       style={{
         left: `${x}%`,
-        top,
-        width: 4,
-        height: 4,
-        marginLeft: -2,
-        marginTop: -2,
-        borderRadius: 999,
-        background: "var(--color-accent-2)",
-        transform: arrived ? "translateY(0)" : "translateY(-72px)",
+        top: yDot,
+        width: 6,
+        height: 6,
+        marginLeft: -3,
+        marginTop: -3,
+        transform: arrived ? `translateY(${toTop}px)` : `translateY(${fromTop}px)`,
         opacity: arrived ? 1 : 0.4,
-        transition: `transform 320ms cubic-bezier(0.32, 0.72, 0, 1), opacity 320ms cubic-bezier(0.32, 0.72, 0, 1)`,
+        transition: `transform 320ms ${PAPER_EASE_DEPLOY}, opacity 320ms ${PAPER_EASE_DEPLOY}`,
       }}
-    />
+    >
+      <span
+        aria-hidden
+        className="absolute inset-0 rounded-full"
+        style={{
+          background:
+            outcome === "fail" ? "var(--color-accent)" : "var(--color-accent-2)",
+          opacity: outcome === "fail" && landed ? 0 : 1,
+          transition: `opacity 200ms ease-out`,
+        }}
+      />
+      {outcome === "fail" && (
+        <svg
+          aria-hidden
+          viewBox="0 0 6 6"
+          className="absolute inset-0"
+          style={{
+            opacity: landed ? 1 : 0,
+            transition: `opacity 200ms ease-out`,
+          }}
+        >
+          <line x1={1} y1={1} x2={5} y2={5} stroke="var(--color-accent)" strokeWidth={1} />
+          <line x1={5} y1={1} x2={1} y2={5} stroke="var(--color-accent)" strokeWidth={1} />
+        </svg>
+      )}
+    </span>
+  );
+}
+
+function DeployPipelineSkeleton() {
+  // 3 lanes — label block + lane stipple + right-gutter block. The stipple
+  // sits at 5% density (no dots-as-data) and matches the lane SVG width.
+  return (
+    <ul className="grid min-h-0 flex-1 divide-y divide-[var(--color-border)]">
+      {[0, 1, 2].map((i) => (
+        <li
+          key={i}
+          className="flex flex-col gap-2 px-6 py-3 sm:grid sm:grid-cols-[132px_1fr_100px] sm:items-center sm:gap-4 lg:grid-cols-[132px_1fr_120px]"
+        >
+          <Skeleton width={132} height={28} density={0.05} seed={11 + i} className="h-7" />
+          <Skeleton width={720} height={36} density={0.05} seed={31 + i} className="h-9 w-full" />
+          <Skeleton width={120} height={28} density={0.05} seed={51 + i} className="h-7" />
+        </li>
+      ))}
+    </ul>
   );
 }
 

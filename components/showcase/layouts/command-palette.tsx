@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FileText,
   Folder,
@@ -12,6 +12,7 @@ import {
   Settings,
   Users,
 } from "lucide-react";
+import { ErrorState } from "@/components/_kit/error-state";
 import { useToast } from "@/components/_kit/toast";
 import { cn } from "@/lib/cn";
 
@@ -247,6 +248,14 @@ export default function CommandPalette() {
   const [flashing, setFlashing] = useState(false);
   const [scrimIn, setScrimIn] = useState(false);
   const [dialogIn, setDialogIn] = useState(false);
+  // Live-pulse "searching" indicator. With local data it never shows; left
+  // here so a real-API swap can flip it on while a request is in flight.
+  const [searching] = useState(false);
+  // Simulated transport error — when on, replaces the result list with a
+  // single ErrorState. `retry` clears it. Wired through but defaults off
+  // so the canonical specimen pose still shows results.
+  const [searchError, setSearchError] = useState(false);
+  const listRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
   const groups = useMemo(() => filterAndRank(query), [query]);
@@ -267,6 +276,27 @@ export default function CommandPalette() {
     });
   }, [groups]);
 
+  // Body scroll lock while palette is open.
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (open) {
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden";
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [open]);
+
+  // Scroll selected row into view on selection change.
+  useEffect(() => {
+    if (!listRef.current) return;
+    const el = listRef.current.querySelector<HTMLElement>(
+      `[data-selected="true"]`,
+    );
+    if (el) el.scrollIntoView({ block: "nearest" });
+  }, [selection]);
+
   // Reveal animation — initial open only.
   useEffect(() => {
     if (!open) return;
@@ -280,33 +310,36 @@ export default function CommandPalette() {
     };
   }, [open]);
 
-  function fire(group: ResultGroup, row: ResultRow) {
-    const verb =
-      group.heading === "Actions"
-        ? "Fired"
-        : group.heading === "Recents"
-          ? "Opened"
-          : "Opened";
-    setFlashing(true);
-    window.setTimeout(() => {
-      setFlashing(false);
-      // Reverse the open animation.
-      setDialogIn(false);
-      setScrimIn(false);
+  const fire = useCallback(
+    (group: ResultGroup, row: ResultRow) => {
+      const verb =
+        group.heading === "Actions"
+          ? "Fired"
+          : group.heading === "Recents"
+            ? "Opened"
+            : "Opened";
+      setFlashing(true);
       window.setTimeout(() => {
-        setOpen(false);
-        toast({ title: `${verb}: ${row.label}` });
-      }, 200);
-    }, 160);
-  }
+        setFlashing(false);
+        // Reverse the open animation.
+        setDialogIn(false);
+        setScrimIn(false);
+        window.setTimeout(() => {
+          setOpen(false);
+          toast({ title: `${verb}: ${row.label}` });
+        }, 200);
+      }, 160);
+    },
+    [toast],
+  );
 
-  function selectCurrent() {
+  const selectCurrent = useCallback(() => {
     const g = groups[selection.groupIdx];
     if (!g) return;
     const row = g.rows[selection.rowIdx];
     if (!row) return;
     fire(g, row);
-  }
+  }, [groups, selection, fire]);
 
   // Keyboard handling — when the plate is open, ⌘K toggles closed; when
   // closed, ⌘K reopens. Esc closes. ↑↓ traverses; Enter fires.
@@ -335,8 +368,7 @@ export default function CommandPalette() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, groups, selection]);
+  }, [open, groups, selectCurrent]);
 
   return (
     <div className="relative grid h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -356,11 +388,16 @@ export default function CommandPalette() {
             }}
           />
 
-          <div className="absolute inset-0 grid place-items-start justify-center pt-16">
+          <div className="absolute inset-0 grid place-items-start justify-center pt-8 sm:pt-16">
             <div
               role="dialog"
               aria-label="Command palette"
-              className="w-[480px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border-strong)] bg-[var(--color-surface)]"
+              aria-describedby="palette-help"
+              className={cn(
+                "overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border-strong)] bg-[var(--color-surface)]",
+                // Below 540px: 90vw with internal density tightened.
+                "w-[90vw] max-w-[480px]",
+              )}
               style={{
                 boxShadow:
                   "0 18px 42px -18px color-mix(in oklch, var(--color-text) 40%, transparent), 0 2px 6px -2px color-mix(in oklch, var(--color-text) 28%, transparent)",
@@ -370,6 +407,10 @@ export default function CommandPalette() {
               }}
               onClick={(e) => e.stopPropagation()}
             >
+              <span id="palette-help" className="sr-only">
+                Press Command-K to toggle, arrows to navigate, Enter to select,
+                Escape to close.
+              </span>
               <div className="border-b border-[var(--color-border)] px-3 pt-2 pb-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
                 Search pages, actions, members
               </div>
@@ -386,14 +427,43 @@ export default function CommandPalette() {
                   placeholder="Search pages, actions, members"
                   className="flex-1 bg-transparent text-[14px] text-[var(--color-text)] placeholder:text-[var(--color-text-muted)] focus:outline-none"
                   data-focus-ring="off"
+                  role="combobox"
+                  aria-expanded="true"
+                  aria-controls="palette-listbox"
+                  aria-autocomplete="list"
                 />
+                {/* Live-pulse "searching" indicator at the right edge of
+                    the input. With local data this never shows; with a
+                    real query API it would tick on while requests are in
+                    flight. */}
+                {searching && (
+                  <span
+                    aria-hidden
+                    className="inline-block h-1.5 w-1.5 animate-live-pulse rounded-full"
+                    style={{ background: "var(--color-accent-2)" }}
+                  />
+                )}
                 <kbd className="rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface-2)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-text-muted)]">
                   esc
                 </kbd>
               </div>
 
-              <div className="py-1">
-                {groups.length === 0 ? (
+              <div
+                ref={listRef}
+                id="palette-listbox"
+                role="listbox"
+                aria-label="Search results"
+                className="py-1 max-h-[60vh] overflow-y-auto"
+              >
+                {searchError ? (
+                  <div className="px-3 py-3">
+                    <ErrorState
+                      variant="inline"
+                      title="Search unavailable."
+                      onRetry={() => setSearchError(false)}
+                    />
+                  </div>
+                ) : groups.length === 0 ? (
                   <EmptyResults query={query} />
                 ) : (
                   groups.map((g, gi) => (
@@ -514,8 +584,20 @@ function Section({
 }
 
 function RecencyLegend() {
+  // Quiet 200ms paper-ease fade-in on first appearance.
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const id = window.setTimeout(() => setShown(true), 80);
+    return () => window.clearTimeout(id);
+  }, []);
   return (
-    <span className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+    <span
+      className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]"
+      style={{
+        opacity: shown ? 1 : 0,
+        transition: `opacity 200ms ${PAPER_EASE}`,
+      }}
+    >
       <span>trail</span>
       <span aria-hidden className="flex items-center gap-0.5">
         {[0, 1, 2, 3].map((i) => (
@@ -559,7 +641,7 @@ function Row({
     : "transparent";
 
   return (
-    <li className="relative">
+    <li className="relative" role="option" aria-selected={selected} data-selected={selected ? "true" : "false"}>
       <span
         aria-hidden
         className="absolute inset-y-1 left-0 w-[2px] origin-center rounded-[var(--radius-xs)] bg-[var(--color-accent-2)]"
@@ -582,7 +664,8 @@ function Row({
         onMouseLeave={() => setHovered(false)}
         data-focus-ring="off"
         className={cn(
-          "flex h-8 w-full items-center gap-3 rounded-[var(--radius-sm)] px-3 text-left text-[13px] text-[var(--color-text)]",
+          // h-7 (28px) on small viewports; h-8 (32px) above 540px.
+          "flex h-7 sm:h-8 w-full items-center gap-3 rounded-[var(--radius-sm)] px-3 text-left text-[13px] text-[var(--color-text)]",
         )}
         style={{
           backgroundColor: bg,

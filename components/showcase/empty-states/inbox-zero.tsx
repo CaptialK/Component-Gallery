@@ -1,12 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Copy, Plus, Trash2, X } from "lucide-react";
 import { DotField } from "@/components/_kit/dot-field";
+import { EmptyState } from "@/components/_kit/empty-state";
+import { ErrorState } from "@/components/_kit/error-state";
 import { Modal } from "@/components/_kit/modal";
+import { Skeleton } from "@/components/_kit/skeleton";
 import { useToast } from "@/components/_kit/toast";
 import { FieldError } from "@/components/_kit/field-error";
 import { cn } from "@/lib/cn";
+
+/** Tiny SSR-safe matchMedia hook used by the compose modal to switch
+ * between a centered dialog and a bottom sheet at the small viewport
+ * breakpoint. Default-false during SSR so the snap captures the
+ * canonical centered pose. */
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const m = window.matchMedia(query);
+    const update = () => setMatches(m.matches);
+    update();
+    m.addEventListener("change", update);
+    return () => m.removeEventListener("change", update);
+  }, [query]);
+  return matches;
+}
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -60,6 +80,7 @@ export default function InboxZero() {
           <button
             type="button"
             onClick={onCopy}
+            aria-live="polite"
             className={cn(
               "inline-flex items-center gap-1 rounded-[var(--radius-xs)] border bg-[var(--color-surface)] px-1 py-0.5 align-baseline font-mono text-[11px] text-[var(--color-text)] transition-colors duration-[120ms] ease-out",
               "border-[var(--color-border)] hover:border-[var(--color-border-strong)]",
@@ -81,11 +102,12 @@ export default function InboxZero() {
           or start something new.
         </p>
 
-        <div className="mt-6 flex items-center gap-2">
+        {/* CTAs: stack vertically below 360px (one per row), inline above. */}
+        <div className="mt-6 flex flex-col items-stretch gap-2 min-[360px]:flex-row min-[360px]:items-center">
           <button
             type="button"
             onClick={() => setComposeOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-sm text-[var(--color-accent-fg)] transition-[transform,border-color] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-sm text-[var(--color-accent-fg)] transition-[transform,border-color] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
           >
             <Plus size={13} strokeWidth={1.8} />
             New thread
@@ -93,7 +115,7 @@ export default function InboxZero() {
           <button
             type="button"
             onClick={() => setArchiveOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-[var(--radius-sm)] px-2 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
           >
             View archive
             <ArrowRight size={13} strokeWidth={1.6} />
@@ -130,38 +152,65 @@ function ComposeModal({
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
   const [recipientErr, setRecipientErr] = useState<string | null>(null);
+  const [sendErr, setSendErr] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Track which chips are still entering — drives the 120ms opacity fade.
+  const enteringChipsRef = useRef<Set<string>>(new Set());
+  const isSheet = useMediaQuery("(max-width: 540px)");
 
   const dirty =
     recipients.length > 0 || subject.length > 0 || body.length > 0 || draft.length > 0;
 
+  function reset() {
+    setRecipients([]);
+    setDraft("");
+    setSubject("");
+    setBody("");
+    setRecipientErr(null);
+    setSendErr(null);
+    setSending(false);
+  }
+
   function handleClose(next: boolean) {
     if (!next && dirty) {
-      const ok =
-        typeof window === "undefined"
-          ? true
-          : window.confirm("Discard this draft?");
-      if (!ok) return;
+      // In-app confirm dialog instead of window.confirm.
+      setConfirmDiscard(true);
+      return;
     }
-    if (!next) {
-      setRecipients([]);
-      setDraft("");
-      setSubject("");
-      setBody("");
-      setRecipientErr(null);
-      setSending(false);
-    }
+    if (!next) reset();
     onOpenChange(next);
   }
 
+  function addRecipient(addr: string) {
+    setRecipients((r) => {
+      if (r.includes(addr)) return r;
+      enteringChipsRef.current.add(addr);
+      // Allow next paint to clear the entering flag.
+      window.requestAnimationFrame(() => {
+        enteringChipsRef.current.delete(addr);
+      });
+      return [...r, addr];
+    });
+  }
+
+  // Splits on newline, comma, OR semicolon — and trims each.
+  function splitTokens(v: string): string[] {
+    return v
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
   function commitToken() {
-    const t = draft.trim().replace(/,$/, "").trim();
-    if (!t) return;
-    if (!EMAIL_RE.test(t)) {
-      setRecipientErr(`"${t}" is not a valid email.`);
+    const tokens = splitTokens(draft);
+    if (tokens.length === 0) return;
+    const bad = tokens.filter((t) => !EMAIL_RE.test(t));
+    if (bad.length > 0) {
+      setRecipientErr(`"${bad[0]}" is not a valid email.`);
       return;
     }
-    setRecipients((r) => [...r, t]);
+    tokens.forEach(addRecipient);
     setDraft("");
     setRecipientErr(null);
   }
@@ -169,42 +218,47 @@ function ComposeModal({
   function onDraftChange(v: string) {
     setDraft(v);
     if (recipientErr) setRecipientErr(null);
-    if (v.endsWith(",") || v.endsWith(" ")) {
-      const t = v.replace(/[, ]+$/, "").trim();
-      if (!t) {
-        setDraft("");
+    // Auto-commit when user types a separator or whitespace.
+    if (/[\n,; ]/.test(v.slice(-1))) {
+      const tokens = splitTokens(v);
+      const bad = tokens.filter((t) => !EMAIL_RE.test(t));
+      if (bad.length) {
+        setRecipientErr(`"${bad[0]}" is not a valid email.`);
         return;
       }
-      if (!EMAIL_RE.test(t)) {
-        setRecipientErr(`"${t}" is not a valid email.`);
-        return;
-      }
-      setRecipients((r) => [...r, t]);
+      tokens.forEach(addRecipient);
       setDraft("");
     }
   }
 
   function onSend() {
     commitToken();
-    const all = recipients.concat(
-      draft.trim() && EMAIL_RE.test(draft.trim()) ? [draft.trim()] : [],
-    );
+    const trailing = splitTokens(draft);
+    const allBad = trailing.filter((t) => !EMAIL_RE.test(t));
+    if (allBad.length) return; // commitToken already surfaced the error.
+    const all = Array.from(new Set(recipients.concat(trailing)));
     if (all.length === 0) {
       setRecipientErr("Add at least one recipient.");
       return;
     }
+    setSendErr(null);
     setSending(true);
     setTimeout(() => {
+      // Simulated 1-in-5 failure.
+      const fail = Math.random() < 0.2;
+      if (fail) {
+        setSending(false);
+        setSendErr(
+          "The transport returned 502. Your draft is preserved.",
+        );
+        return;
+      }
       onOpenChange(false);
       toast({
         title: `Thread sent to ${all.length} recipient${all.length === 1 ? "" : "s"}`,
         status: "success",
       });
-      setRecipients([]);
-      setDraft("");
-      setSubject("");
-      setBody("");
-      setSending(false);
+      reset();
     }, 200);
   }
 
@@ -212,7 +266,7 @@ function ComposeModal({
     <Modal
       open={open}
       onOpenChange={handleClose}
-      placement="center"
+      placement={isSheet ? "bottom" : "center"}
       size="md"
       ariaLabel="Compose new thread"
     >
@@ -231,6 +285,23 @@ function ComposeModal({
       </div>
 
       <div className="px-4 py-4">
+        {/* Send-failure inline error — replaces nothing; sits above the
+            form fields so it's seen on retry. */}
+        {sendErr && (
+          <div className="mb-3">
+            <ErrorState
+              variant="inline"
+              title="Couldn't send. Retry."
+              body={sendErr}
+              onRetry={() => {
+                setSendErr(null);
+                onSend();
+              }}
+              onDismiss={() => setSendErr(null)}
+            />
+          </div>
+        )}
+
         {/* TO chips */}
         <label className="block text-[11px] font-medium text-[var(--color-text)]">
           To
@@ -242,20 +313,14 @@ function ComposeModal({
           )}
         >
           {recipients.map((r, i) => (
-            <span
+            <RecipientChip
               key={`${r}-${i}`}
-              className="inline-flex items-center gap-1 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-text)]"
-            >
-              {r}
-              <button
-                type="button"
-                onClick={() => setRecipients((arr) => arr.filter((_, j) => j !== i))}
-                aria-label={`Remove ${r}`}
-                className="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
-              >
-                <X size={9} strokeWidth={1.8} />
-              </button>
-            </span>
+              addr={r}
+              entering={enteringChipsRef.current.has(r)}
+              onRemove={() =>
+                setRecipients((arr) => arr.filter((_, j) => j !== i))
+              }
+            />
           ))}
           <input
             value={draft}
@@ -323,6 +388,102 @@ function ComposeModal({
           )}
         </button>
       </div>
+      {/* In-app discard confirm — replaces window.confirm. */}
+      <DiscardConfirmModal
+        open={confirmDiscard}
+        onCancel={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          setConfirmDiscard(false);
+          reset();
+          onOpenChange(false);
+        }}
+      />
+    </Modal>
+  );
+}
+
+/** A single TO-line chip; fades in over 120ms on first paint. */
+function RecipientChip({
+  addr,
+  entering,
+  onRemove,
+}: {
+  addr: string;
+  entering: boolean;
+  onRemove: () => void;
+}) {
+  const [shown, setShown] = useState(!entering);
+  useEffect(() => {
+    if (entering) {
+      const id = window.setTimeout(() => setShown(true), 0);
+      return () => window.clearTimeout(id);
+    }
+  }, [entering]);
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-[11px] text-[var(--color-text)]"
+      style={{
+        opacity: shown ? 1 : 0,
+        transition: "opacity 120ms ease-out",
+      }}
+    >
+      {addr}
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${addr}`}
+        className="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+      >
+        <X size={9} strokeWidth={1.8} />
+      </button>
+    </span>
+  );
+}
+
+function DiscardConfirmModal({
+  open,
+  onCancel,
+  onConfirm,
+}: {
+  open: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <Modal
+      open={open}
+      onOpenChange={(v) => !v && onCancel()}
+      placement="center"
+      size="sm"
+      ariaLabel="Discard draft?"
+    >
+      <div className="px-4 py-4">
+        <h3
+          className="font-display italic text-[18px] tracking-[-0.02em] leading-tight text-[var(--color-text)]"
+          style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
+        >
+          Discard this draft?
+        </h3>
+        <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-text-muted)]">
+          Your recipients, subject, and body will be lost.
+        </p>
+      </div>
+      <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] px-4 py-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="inline-flex h-8 items-center rounded-[var(--radius-sm)] px-2 text-[12px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+        >
+          Keep editing
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="inline-flex h-8 items-center rounded-[var(--radius-sm)] border border-[var(--color-accent)] bg-[color-mix(in_oklch,var(--color-accent)_8%,var(--color-surface))] px-3 text-[12.5px] text-[var(--color-accent)] hover:bg-[color-mix(in_oklch,var(--color-accent)_14%,var(--color-surface))]"
+        >
+          Discard
+        </button>
+      </div>
     </Modal>
   );
 }
@@ -334,6 +495,21 @@ function ArchiveDrawer({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  // Loading + error simulated for the rendered specimen. Loading flips
+  // off after 200ms; error stays off in the canonical pose. Both states
+  // stay reachable for snapping if a tester flips them locally.
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  // Toggle: drop ARCHIVED to [] to render the empty state.
+  const [items] = useState(ARCHIVED);
+
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    const id = window.setTimeout(() => setLoading(false), 200);
+    return () => window.clearTimeout(id);
+  }, [open]);
+
   return (
     <Modal
       open={open}
@@ -352,7 +528,9 @@ function ArchiveDrawer({
               className="font-display text-[18px] italic leading-tight text-[var(--color-text)]"
               style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
             >
-              {ARCHIVED.length} threads
+              {loading
+                ? "loading…"
+                : `${items.length} thread${items.length === 1 ? "" : "s"}`}
             </div>
           </div>
           <button
@@ -364,27 +542,59 @@ function ArchiveDrawer({
             <X size={14} strokeWidth={1.6} />
           </button>
         </div>
+        {loadError && (
+          <ErrorState
+            variant="banner"
+            title="Archive unavailable."
+            onRetry={() => {
+              setLoadError(false);
+              setLoading(true);
+              window.setTimeout(() => setLoading(false), 200);
+            }}
+          />
+        )}
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {ARCHIVED.map((t) => (
-            <div
-              key={t.id}
-              className="group relative grid grid-cols-[80px_1fr_60px] items-center gap-3 border-b border-[var(--color-border)] px-4 py-3 transition-[background-color,border-color] duration-[120ms] ease-out hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface)]"
-            >
-              <span
-                aria-hidden
-                className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent-2)] opacity-0 transition-opacity duration-[120ms] ease-out group-hover:opacity-100"
-              />
-              <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
-                {t.id}
-              </span>
-              <span className="truncate text-[13px] text-[var(--color-text)]">
-                {t.title}
-              </span>
-              <span className="text-right font-mono text-[10px] text-[var(--color-text-muted)]">
-                {t.date}
-              </span>
+          {loading ? (
+            <div className="flex flex-col gap-1 px-4 py-3">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton
+                  key={i}
+                  width={420}
+                  height={44}
+                  density={0.05}
+                  seed={i + 1}
+                />
+              ))}
             </div>
-          ))}
+          ) : items.length === 0 ? (
+            <EmptyState
+              density="inline"
+              title="Nothing archived yet."
+              body="Threads land here after 30 days."
+            />
+          ) : (
+            items.map((t) => (
+              <div
+                key={t.id}
+                className="group relative grid grid-cols-[80px_1fr_60px] items-center gap-3 border-b border-[var(--color-border)] px-4 py-3 transition-[background-color,border-color] duration-[120ms] ease-out hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface)]"
+              >
+                <span
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent-2)] opacity-0 transition-opacity duration-[120ms] ease-out group-hover:opacity-100"
+                />
+                <span className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                  {t.id}
+                </span>
+                {/* Rows are presentational; not interactive in this plate. */}
+                <span className="truncate text-[13px] text-[var(--color-text)]">
+                  {t.title}
+                </span>
+                <span className="text-right font-mono text-[10px] text-[var(--color-text-muted)]">
+                  {t.date}
+                </span>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </Modal>
@@ -402,18 +612,69 @@ function RulesDrawer({
   const [rules, setRules] = useState<Rule[]>(INITIAL_RULES);
   const [newSubject, setNewSubject] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [subjectErr, setSubjectErr] = useState<string | null>(null);
+  const [labelErr, setLabelErr] = useState<string | null>(null);
+  // Inline 2-step delete confirm — id of the row in "are you sure?" mode.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [leavingId, setLeavingId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Loading state on open.
+  useEffect(() => {
+    if (!open) return;
+    setLoading(true);
+    const id = window.setTimeout(() => setLoading(false), 200);
+    return () => window.clearTimeout(id);
+  }, [open]);
 
   function addRule() {
-    if (!newSubject.trim() || !newLabel.trim()) return;
+    const subject = newSubject.trim();
+    const label = newLabel.trim();
+    let bad = false;
+    if (!subject) {
+      setSubjectErr("Required.");
+      bad = true;
+    }
+    if (!label) {
+      setLabelErr("Required.");
+      bad = true;
+    }
+    if (bad) return;
+    // Dedupe — same subject + label combination already exists.
+    const dup = rules.some(
+      (r) => r.subject === subject && r.label === label,
+    );
+    if (dup) {
+      setSubjectErr("Duplicate of an existing rule.");
+      return;
+    }
     const id = `r${Date.now()}`;
-    setRules((r) => [...r, { id, subject: newSubject.trim(), label: newLabel.trim() }]);
+    setRules((r) => [...r, { id, subject, label }]);
     setNewSubject("");
     setNewLabel("");
+    setSubjectErr(null);
+    setLabelErr(null);
     toast({ title: "Rule added", status: "success" });
   }
 
-  function deleteRule(id: string) {
-    setRules((r) => r.filter((x) => x.id !== id));
+  function onDeleteClick(id: string) {
+    if (confirmDeleteId === id) {
+      // Second click — confirm. Fade out then unmount.
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+      setConfirmDeleteId(null);
+      setLeavingId(id);
+      window.setTimeout(() => {
+        setRules((r) => r.filter((x) => x.id !== id));
+        setLeavingId(null);
+      }, 120);
+      return;
+    }
+    setConfirmDeleteId(id);
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    confirmTimerRef.current = setTimeout(() => {
+      setConfirmDeleteId((cur) => (cur === id ? null : cur));
+    }, 4000);
   }
 
   return (
@@ -448,51 +709,103 @@ function RulesDrawer({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
-                <th className="py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-[0.16em]">
-                  If subject contains
-                </th>
-                <th className="py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-[0.16em]">
-                  Label as
-                </th>
-                <th className="w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {rules.map((r) => (
-                <tr key={r.id} className="border-b border-[var(--color-border)]">
-                  <td className="py-2 font-mono text-[11.5px]">{r.subject}</td>
-                  <td className="py-2 font-mono text-[11.5px] text-[var(--color-accent-2)]">
-                    #{r.label}
-                  </td>
-                  <td className="py-2 text-right">
-                    <button
-                      type="button"
-                      onClick={() => deleteRule(r.id)}
-                      aria-label="Remove rule"
-                      className="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
-                    >
-                      <Trash2 size={11} strokeWidth={1.6} />
-                    </button>
-                  </td>
-                </tr>
+          {loading ? (
+            <div className="flex flex-col gap-1">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton
+                  key={i}
+                  width={420}
+                  height={44}
+                  density={0.05}
+                  seed={i + 9}
+                />
               ))}
-            </tbody>
-          </table>
+            </div>
+          ) : rules.length === 0 ? (
+            <EmptyState
+              density="inline"
+              title="No rules."
+              body="Add one below to start filtering inbound mail."
+            />
+          ) : (
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
+                  <th className="py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-[0.16em]">
+                    If subject contains
+                  </th>
+                  <th className="py-1.5 text-left font-mono text-[10px] font-medium uppercase tracking-[0.16em]">
+                    Label as
+                  </th>
+                  <th className="w-16" />
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => {
+                  const leaving = leavingId === r.id;
+                  const confirming = confirmDeleteId === r.id;
+                  return (
+                    <tr
+                      key={r.id}
+                      className="border-b border-[var(--color-border)]"
+                      style={{
+                        opacity: leaving ? 0 : 1,
+                        transition: "opacity 120ms ease-out",
+                      }}
+                    >
+                      <td className="py-2 font-mono text-[11.5px]">{r.subject}</td>
+                      <td className="py-2 font-mono text-[11.5px] text-[var(--color-accent-2)]">
+                        #{r.label}
+                      </td>
+                      <td className="py-2 text-right">
+                        {confirming ? (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteClick(r.id)}
+                            aria-label="Confirm delete rule"
+                            className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-accent)] hover:underline"
+                          >
+                            sure?
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onDeleteClick(r.id)}
+                            aria-label="Remove rule"
+                            className="text-[var(--color-text-muted)] hover:text-[var(--color-accent)]"
+                          >
+                            <Trash2 size={11} strokeWidth={1.6} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
 
-          <div className="mt-4 grid grid-cols-[1fr_1fr_auto] items-end gap-2">
+          <div className="mt-4 grid grid-cols-[1fr_1fr_auto] items-start gap-2">
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
                 Subject
               </label>
               <input
                 value={newSubject}
-                onChange={(e) => setNewSubject(e.target.value)}
+                onChange={(e) => {
+                  setNewSubject(e.target.value);
+                  if (subjectErr) setSubjectErr(null);
+                }}
                 placeholder="[STAGING]"
-                className="mt-1 h-8 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-[12px] focus:border-[var(--color-border-strong)] focus:outline-none"
+                aria-invalid={Boolean(subjectErr)}
+                className={cn(
+                  "mt-1 h-8 w-full rounded-[var(--radius-sm)] border bg-[var(--color-bg)] px-2 text-[12px] focus:outline-none",
+                  subjectErr
+                    ? "border-[var(--color-accent)] focus:border-[var(--color-accent)]"
+                    : "border-[var(--color-border)] focus:border-[var(--color-border-strong)]",
+                )}
               />
+              <FieldError>{subjectErr}</FieldError>
             </div>
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
@@ -500,15 +813,25 @@ function RulesDrawer({
               </label>
               <input
                 value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
+                onChange={(e) => {
+                  setNewLabel(e.target.value);
+                  if (labelErr) setLabelErr(null);
+                }}
                 placeholder="staging"
-                className="mt-1 h-8 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 text-[12px] focus:border-[var(--color-border-strong)] focus:outline-none"
+                aria-invalid={Boolean(labelErr)}
+                className={cn(
+                  "mt-1 h-8 w-full rounded-[var(--radius-sm)] border bg-[var(--color-bg)] px-2 text-[12px] focus:outline-none",
+                  labelErr
+                    ? "border-[var(--color-accent)] focus:border-[var(--color-accent)]"
+                    : "border-[var(--color-border)] focus:border-[var(--color-border-strong)]",
+                )}
               />
+              <FieldError>{labelErr}</FieldError>
             </div>
             <button
               type="button"
               onClick={addRule}
-              className="inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2.5 text-[12px] hover:border-[var(--color-text)]"
+              className="mt-[19px] inline-flex h-8 items-center gap-1 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-2.5 text-[12px] hover:border-[var(--color-text)]"
             >
               <Plus size={11} strokeWidth={1.8} />
               Add
