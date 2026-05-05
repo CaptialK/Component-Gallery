@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { mulberry32 } from "@/components/_kit/dot-noise";
 
 /**
@@ -299,16 +299,19 @@ export default function ActivityHeatmap() {
           </g>
 
           {/* Custom tooltip — rendered last so it paints on top of the
-              grid. Pointer-events disabled so it can't intercept hover. */}
-          {hovered && (
-            <CellTooltip
-              cell={hovered}
-              dayLabelGutter={dayLabelGutter}
-              monthLabelHeight={monthLabelHeight}
-              totalWidth={totalWidth}
-              gridHeight={gridHeight}
-            />
-          )}
+              grid. Pointer-events disabled so it can't intercept hover.
+              Wrapped in an opacity-toggled <g> so the exit fades over 120ms
+              (locked tooltip vocab: 0ms in, 120ms ease-out out) instead of
+              snapping to nothing. The tooltip body keeps the LAST hovered
+              cell while the wrapper fades, so position doesn't jump during
+              the exit. */}
+          <CellTooltipFader
+            hovered={hovered}
+            dayLabelGutter={dayLabelGutter}
+            monthLabelHeight={monthLabelHeight}
+            totalWidth={totalWidth}
+            gridHeight={gridHeight}
+          />
         </svg>
         </div>
 
@@ -329,6 +332,52 @@ export default function ActivityHeatmap() {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * Fader wrapper around the in-SVG tooltip. Renders the tooltip group
+ * always (never unmounts) and toggles its opacity via a CSS transition
+ * so the exit takes 120ms ease-out, matching the locked tooltip vocab
+ * (0ms in, 120ms out). When `hovered` becomes null we keep the LAST
+ * tooltip's geometry frozen while it fades, so the tooltip doesn't jump
+ * to (0, 0) on exit.
+ */
+function CellTooltipFader({
+  hovered,
+  dayLabelGutter,
+  monthLabelHeight,
+  totalWidth,
+  gridHeight,
+}: {
+  hovered: Cell | null;
+  dayLabelGutter: number;
+  monthLabelHeight: number;
+  totalWidth: number;
+  gridHeight: number;
+}) {
+  // Hold on to the most-recent non-null cell so the exit doesn't reposition.
+  const lastRef = useRef<Cell | null>(null);
+  if (hovered) lastRef.current = hovered;
+  const cell = hovered ?? lastRef.current;
+  if (!cell) return null;
+  return (
+    <g
+      style={{
+        opacity: hovered ? 1 : 0,
+        transition: "opacity 120ms ease-out",
+      }}
+      pointerEvents="none"
+      aria-hidden
+    >
+      <CellTooltip
+        cell={cell}
+        dayLabelGutter={dayLabelGutter}
+        monthLabelHeight={monthLabelHeight}
+        totalWidth={totalWidth}
+        gridHeight={gridHeight}
+      />
+    </g>
   );
 }
 

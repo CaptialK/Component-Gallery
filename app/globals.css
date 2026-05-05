@@ -191,6 +191,31 @@ html:not(.light):not(.dark) body {
   visibility: hidden;
 }
 
+/* ---------- MOTION ----------
+   Calibrated live pulse. Tailwind's `animate-pulse` envelope is 1 → 0.5 → 1
+   which dips below baseline; the catalogue's pulse is the inverse — a
+   *brightening* breath that returns to a quieted floor. 0.45 → 1 → 0.45 over
+   2000ms ease-in-out, the locked motion vocab for any "live" indicator. */
+@keyframes live-pulse {
+  0% { opacity: 0.45; }
+  50% { opacity: 1; }
+  100% { opacity: 0.45; }
+}
+.animate-live-pulse {
+  animation: live-pulse 2000ms ease-in-out infinite;
+}
+
+/* Hard-binary text caret blink — typewriter cadence at 1.1s. Distinct from
+   live-pulse (which is a brightening breath for streaming data); a caret
+   blinks by going fully out, not by dimming to a quieted floor. */
+@keyframes caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+.animate-caret-blink {
+  animation: caret-blink 1100ms steps(1, end) infinite;
+}
+
 /* ---------- SHIKI dual-theme bridge ----------
    Shiki emits both light/dark tokens; we pick based on the html class. */
 .shiki,

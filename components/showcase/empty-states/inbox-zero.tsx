@@ -1,5 +1,3 @@
-"use client";
-
 import { ArrowRight, Plus } from "lucide-react";
 import { DotField } from "@/components/_kit/dot-field";
 
@@ -27,7 +25,7 @@ export default function InboxZero() {
         <div className="mt-6 flex items-center gap-2">
           <button
             type="button"
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-sm text-[var(--color-accent-fg)] hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-sm text-[var(--color-accent-fg)] transition-[transform,border-color] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
           >
             <Plus size={13} strokeWidth={1.8} />
             New thread

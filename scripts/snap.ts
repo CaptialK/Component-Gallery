@@ -26,6 +26,14 @@ const OUT_DIR = path.join(process.cwd(), "public", "previews");
 const VIEWPORT = { width: 1200, height: 800 };
 const THEMES = ["light", "dark"] as const;
 
+// Comma-separated slug allowlist via `SNAP_SLUGS=foo,bar pnpm snap`. Empty
+// → snap every entry. Useful for partial re-snaps during head-to-head
+// batches where re-rendering the rest would shift plate-number watermarks
+// in untouched previews.
+const SLUG_FILTER = process.env.SNAP_SLUGS
+  ? new Set(process.env.SNAP_SLUGS.split(",").map((s) => s.trim()).filter(Boolean))
+  : null;
+
 type Theme = (typeof THEMES)[number];
 
 async function snap(
@@ -77,7 +85,11 @@ async function main(): Promise<void> {
     browser = await chromium.launch();
     const ctx = await browser.newContext({ viewport: VIEWPORT });
 
-    for (const entry of REGISTRY) {
+    const targets = SLUG_FILTER
+      ? REGISTRY.filter((e) => SLUG_FILTER.has(e.slug))
+      : REGISTRY;
+
+    for (const entry of targets) {
       for (const theme of THEMES) {
         await snap(ctx, entry.category, entry.slug, theme);
       }
@@ -85,7 +97,7 @@ async function main(): Promise<void> {
 
     await ctx.close();
     console.log(
-      `\n  ${REGISTRY.length * THEMES.length} previews written to public/previews/`,
+      `\n  ${targets.length * THEMES.length} previews written to public/previews/`,
     );
   } finally {
     await browser?.close();

@@ -77,7 +77,7 @@ export default function EmptyTableSuggestions() {
               <button
                 key={f}
                 type="button"
-                className="inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-text)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
+                className="inline-flex h-6 items-center gap-1.5 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[var(--color-text)] transition-colors duration-[120ms] ease-out hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]"
                 aria-label={`Remove filter ${f}`}
               >
                 {f}
@@ -185,8 +185,12 @@ function SuggestionRow({
   s: { id: string; title: string; category: string; updated: string };
 }) {
   return (
-    <tr className="border-b border-[var(--color-border)] hover:bg-[var(--color-surface)]">
-      <td className="px-4 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)]">
+    <tr className="group relative border-b border-[var(--color-border)] transition-[background-color,border-color] duration-[120ms] ease-out hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface)]">
+      <td className="relative px-4 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)]">
+        <span
+          aria-hidden
+          className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent-2)] opacity-0 transition-opacity duration-[120ms] ease-out group-hover:opacity-100"
+        />
         {s.id}
       </td>
       <td className="px-4 py-2.5">

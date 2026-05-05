@@ -157,7 +157,7 @@ function Section({
           <button
             type="button"
             onClick={onEdit}
-            className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] text-[var(--color-text-muted)] transition-colors duration-[120ms] ease-out hover:text-[var(--color-text)]"
           >
             <Pencil size={11} strokeWidth={1.6} />
             Edit
@@ -165,23 +165,40 @@ function Section({
         )}
       </header>
 
-      {status === "active" && (
-        <div className="border-t border-[var(--color-border)] px-4 py-4">
-          {stepKey === "account" && <AccountStep />}
-          {stepKey === "workspace" && <WorkspaceStep />}
-          {stepKey === "invite" && <InviteStep />}
-          <div className="mt-5 flex justify-end">
-            <button
-              type="button"
-              onClick={onContinue}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-[13px] text-[var(--color-accent-fg)] hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
-            >
-              Save &amp; continue
-              <ArrowRight size={13} strokeWidth={1.8} />
-            </button>
+      {/* Active body — gated via grid-template-rows 0fr↔1fr so opening/closing
+          is a pure-CSS height transition, no JS measuring. */}
+      <div
+        className="grid overflow-hidden transition-[grid-template-rows] duration-[200ms]"
+        style={{
+          gridTemplateRows: status === "active" ? "1fr" : "0fr",
+          transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)",
+        }}
+        aria-hidden={status !== "active"}
+      >
+        <div
+          className="min-h-0 transition-opacity duration-[200ms]"
+          style={{
+            opacity: status === "active" ? 1 : 0,
+            transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)",
+          }}
+        >
+          <div className="border-t border-[var(--color-border)] px-4 py-4">
+            {stepKey === "account" && <AccountStep />}
+            {stepKey === "workspace" && <WorkspaceStep />}
+            {stepKey === "invite" && <InviteStep />}
+            <div className="mt-4 flex justify-end">
+              <button
+                type="button"
+                onClick={onContinue}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-[13px] text-[var(--color-accent-fg)] transition-[transform,border-color] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
+              >
+                Save &amp; continue
+                <ArrowRight size={13} strokeWidth={1.8} />
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Future step — show a dimmed preview of the form so the reader sees
           what's coming, not just a title. Inputs are disabled; the section
@@ -207,25 +224,39 @@ function StatusGlyph({
   // z-10 + ring matching the surface bg knocks out the connecting thread
   // behind each glyph, so the line reads as "thread connects steps" rather
   // than "line passes through bullets."
-  if (status === "done") {
+  // Future state is structurally distinct (border + bg-bg), so it returns
+  // its own element. done↔active share a filled disc element so background
+  // colour can transition between persimmon and Federal Blue, with the
+  // Check fading in over the same 200ms.
+  if (status === "future") {
     return (
-      <span className="relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--color-accent-2)] text-[var(--color-accent-fg)] ring-2 ring-[var(--color-bg)]">
-        <Check size={13} strokeWidth={2} />
-      </span>
-    );
-  }
-  if (status === "active") {
-    return (
-      <span
-        className="relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--color-accent)] font-mono text-[12px] text-[var(--color-accent-fg)] ring-2 ring-[var(--color-bg)]"
-      >
+      <span className="relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-bg)] font-mono text-[12px] text-[var(--color-text-muted)] ring-2 ring-[var(--color-bg)]">
         {index}
       </span>
     );
   }
+  const isDone = status === "done";
   return (
-    <span className="relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-bg)] font-mono text-[12px] text-[var(--color-text-muted)] ring-2 ring-[var(--color-bg)]">
-      {index}
+    <span
+      className="relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full font-mono text-[12px] text-[var(--color-accent-fg)] ring-2 ring-[var(--color-bg)] transition-[background-color] duration-[200ms] ease-out"
+      style={{
+        backgroundColor: isDone ? "var(--color-accent-2)" : "var(--color-accent)",
+      }}
+    >
+      <span
+        aria-hidden
+        className="absolute inset-0 grid place-items-center transition-opacity duration-[200ms] ease-out"
+        style={{ opacity: isDone ? 1 : 0 }}
+      >
+        <Check size={13} strokeWidth={2} />
+      </span>
+      <span
+        aria-hidden={isDone}
+        className="transition-opacity duration-[200ms] ease-out"
+        style={{ opacity: isDone ? 0 : 1 }}
+      >
+        {index}
+      </span>
     </span>
   );
 }

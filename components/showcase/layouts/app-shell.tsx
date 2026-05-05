@@ -17,8 +17,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
-const NAV: { label: string; icon: typeof Home; count?: number; active?: boolean }[] = [
-  { label: "Overview", icon: Home, active: true },
+const NAV: { label: string; icon: typeof Home; count?: number }[] = [
+  { label: "Overview", icon: Home },
   { label: "Inbox", icon: Inbox, count: 4 },
   { label: "Documents", icon: FileText },
   { label: "Projects", icon: Folder, count: 12 },
@@ -61,15 +61,17 @@ const STATUS_KEYS: StatusKey[] = ["Drafting", "In review", "Approved", "Blocked"
 
 export default function AppShell() {
   const [collapsed, setCollapsed] = useState(false);
+  const [activeNav, setActiveNav] = useState<string>("Overview");
 
   return (
     <div className="grid h-full w-full grid-cols-[auto_1fr] bg-[var(--color-bg)] text-[var(--color-text)]">
       {/* Sidebar */}
       <aside
         className={cn(
-          "flex h-full flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] transition-[width]",
+          "flex h-full flex-col border-r border-[var(--color-border)] bg-[var(--color-surface-2)] transition-[width] duration-[200ms]",
           collapsed ? "w-14" : "w-[232px]",
         )}
+        style={{ transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)" }}
       >
         <div className="flex h-12 items-center gap-2 border-b border-[var(--color-border)] px-3">
           <span
@@ -108,9 +110,13 @@ export default function AppShell() {
               <li key={item.label}>
                 <a
                   href="#"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setActiveNav(item.label);
+                  }}
                   className={cn(
-                    "flex h-7 items-center gap-2 rounded-[var(--radius-sm)] px-2 text-[13px]",
-                    item.active
+                    "flex h-7 items-center gap-2 rounded-[var(--radius-sm)] px-2 text-[13px] transition-[border-color,box-shadow,background-color] duration-[120ms] ease-out",
+                    activeNav === item.label
                       ? "bg-[var(--color-surface)] text-[var(--color-text)] shadow-[inset_0_0_0_1px_var(--color-border)]"
                       : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]",
                   )}
@@ -290,12 +296,12 @@ export default function AppShell() {
                   {ROWS.map((r) => (
                     <tr
                       key={r.id}
-                      className="group relative border-b border-[var(--color-border)] hover:bg-[var(--color-surface)]"
+                      className="group relative border-b border-[var(--color-border)] transition-[background-color,opacity] duration-[120ms] ease-out hover:bg-[var(--color-surface)]"
                     >
                       <td className="relative px-6 py-2.5 font-mono text-[11px] text-[var(--color-text-muted)]">
                         <span
                           aria-hidden
-                          className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent-2)] opacity-0 group-hover:opacity-100"
+                          className="absolute inset-y-0 left-0 w-[2px] bg-[var(--color-accent-2)] opacity-0 transition-[background-color,opacity] duration-[120ms] ease-out group-hover:opacity-100"
                         />
                         {r.id}
                       </td>

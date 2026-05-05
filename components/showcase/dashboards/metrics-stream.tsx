@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import { mulberry32 } from "@/components/_kit/dot-noise";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
 
@@ -17,7 +20,17 @@ import { Trace, type TracePoint } from "@/components/_kit/trace";
  *  - Threshold rules (target / floor) appear when relevant, dashed
  *    walnut, dropping in behind the trend.
  *
- * Pure server component. Mock data only.
+ * Motion (interactivity pass, 2026-05-04):
+ *  - LivePulse uses the calibrated `live-pulse` keyframes (0.45 → 1 → 0.45
+ *    over 2000ms ease-in-out), not Tailwind's animate-pulse which dips
+ *    below baseline.
+ *  - On first viewport entry, each Trace's polyline draws in via
+ *    stroke-dashoffset over 320ms paper-ease; the terminal Federal Blue
+ *    dot fades opacity 0→1 over 120ms after the line completes.
+ *    Strips stagger 30ms in order; threshold rules stay static (reference,
+ *    not data). Fires once per session via IntersectionObserver.
+ *
+ * Client component — needs IntersectionObserver to gate the in-view draw.
  */
 
 type Metric = {
@@ -79,9 +92,39 @@ const METRICS: Metric[] = [
   },
 ];
 
+const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
+
 export default function MetricsStream() {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (firedRef.current) return;
+    const node = rootRef.current;
+    if (!node) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting && !firedRef.current) {
+            firedRef.current = true;
+            setInView(true);
+            obs.disconnect();
+            return;
+          }
+        }
+      },
+      { threshold: 0.2 },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, []);
+
   return (
-    <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
+    <div
+      ref={rootRef}
+      className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]"
+    >
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
@@ -104,8 +147,8 @@ export default function MetricsStream() {
 
         {/* Strips — flex-1 with grow, so 4 rows fill the plate. */}
         <ul className="flex min-h-0 flex-1 flex-col divide-y divide-[var(--color-border)]">
-          {METRICS.map((m) => (
-            <Strip key={m.label} m={m} />
+          {METRICS.map((m, i) => (
+            <Strip key={m.label} m={m} inView={inView} stripIndex={i} />
           ))}
         </ul>
 
@@ -124,10 +167,85 @@ export default function MetricsStream() {
   );
 }
 
-function Strip({ m }: { m: Metric }) {
+function Strip({
+  m,
+  inView,
+  stripIndex,
+}: {
+  m: Metric;
+  inView: boolean;
+  stripIndex: number;
+}) {
   const yMin = Math.min(...m.series.map((p) => p.y), m.target ?? Infinity);
   const yMax = Math.max(...m.series.map((p) => p.y), m.target ?? -Infinity);
   const pad = (yMax - yMin) * 0.18 || 1;
+
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Stagger 30ms across strips, then trigger the dashoffset → 0 transition.
+  // After the 320ms draw, fade the terminal dot from opacity 0 → 1 over
+  // 120ms. The dot is the only <circle> Trace renders for this strip;
+  // we hide it from the start by setting opacity:0 inline, then transition
+  // it in once the line finishes drawing.
+  useEffect(() => {
+    if (!inView) return;
+    const node = wrapRef.current;
+    if (!node) return;
+
+    // Trace renders threshold rules (<line>), the trend (<path fill="none">),
+    // and dot marks (<circle>). We grab the path for the dashoffset draw and
+    // any circles for the post-draw fade-in.
+    const path = node.querySelector<SVGPathElement>("path[fill='none']");
+    const circles = Array.from(node.querySelectorAll<SVGCircleElement>("circle"));
+    if (!path) return;
+
+    const len = (() => {
+      try {
+        return path.getTotalLength();
+      } catch {
+        return 0;
+      }
+    })();
+
+    // Hide the terminal dot up front; fade it in after the line completes.
+    for (const c of circles) {
+      c.style.opacity = "0";
+    }
+
+    if (len <= 0) {
+      // Nothing to animate — fade the dot in immediately so we never end in
+      // a hidden state.
+      for (const c of circles) {
+        c.style.transition = "opacity 120ms ease-out";
+        c.style.opacity = "1";
+      }
+      return;
+    }
+
+    path.style.transition = "none";
+    path.style.strokeDasharray = `${len}`;
+    path.style.strokeDashoffset = `${len}`;
+    // Force a reflow so the next style change kicks the transition.
+    void path.getBoundingClientRect();
+
+    const startDelay = stripIndex * 30;
+    const t1 = window.setTimeout(() => {
+      path.style.transition = `stroke-dashoffset 320ms ${PAPER_EASE}`;
+      path.style.strokeDashoffset = "0";
+    }, startDelay);
+    const t2 = window.setTimeout(() => {
+      for (const c of circles) {
+        c.style.transition = "opacity 120ms ease-out";
+        c.style.opacity = "1";
+      }
+    }, startDelay + 320);
+
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [inView, stripIndex]);
+
   return (
     <li className="grid flex-1 grid-cols-[180px_1fr_140px] items-center gap-4 px-6 py-4">
       {/* Label + target */}
@@ -143,8 +261,13 @@ function Strip({ m }: { m: Metric }) {
         )}
       </div>
 
-      {/* Trace — fills its cell, height bumped to 76 so it fills taller strips. */}
-      <div className="min-w-0">
+      {/* Trace — fills its cell, height bumped to 76 so it fills taller strips.
+          Wrapped in a ref'd div so we can find the underlying <path> and
+          run the stroke-dashoffset draw on first viewport entry. The
+          terminal dot is rendered as a sibling SVG overlay so we can fade
+          it in independently after the line completes (Trace's built-in
+          `dots` would render at full opacity from the start). */}
+      <div ref={wrapRef} className="relative min-w-0">
         <Trace
           data={m.series}
           width={520}
@@ -199,13 +322,14 @@ function formatTarget(m: Metric): string {
   return String(m.target);
 }
 
-/** Tiny pulsing live dot — uses the existing color-accent-2 token. The
- *  `animate-pulse` is the only motion in the catalogue; it's quiet enough. */
+/** Tiny pulsing live dot — uses the calibrated `live-pulse` keyframes
+ *  (0.45 → 1 → 0.45, 2000ms ease-in-out) defined in globals.css. Tailwind's
+ *  `animate-pulse` is the wrong envelope for this — it dips below baseline. */
 function LivePulse() {
   return (
     <span
       aria-hidden
-      className="mr-1.5 inline-block h-1.5 w-1.5 translate-y-[-1px] animate-pulse rounded-full bg-[var(--color-accent-2)]"
+      className="animate-live-pulse mr-1.5 inline-block h-1.5 w-1.5 translate-y-[-1px] rounded-full bg-[var(--color-accent-2)]"
     />
   );
 }

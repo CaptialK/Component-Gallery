@@ -83,7 +83,20 @@ export default function CenteredSignin() {
                 aria-label={showPw ? "Hide password" : "Show password"}
                 className="absolute right-1 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-[var(--radius-xs)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-text)]"
               >
-                {showPw ? <EyeOff size={13} strokeWidth={1.6} /> : <Eye size={13} strokeWidth={1.6} />}
+                <span aria-hidden className="relative grid h-[13px] w-[13px] place-items-center">
+                  <Eye
+                    size={13}
+                    strokeWidth={1.6}
+                    className="absolute inset-0 transition-opacity duration-[120ms] ease-out"
+                    style={{ opacity: showPw ? 0 : 1 }}
+                  />
+                  <EyeOff
+                    size={13}
+                    strokeWidth={1.6}
+                    className="absolute inset-0 transition-opacity duration-[120ms] ease-out"
+                    style={{ opacity: showPw ? 1 : 0 }}
+                  />
+                </span>
               </button>
             </div>
           </Field>
@@ -94,6 +107,7 @@ export default function CenteredSignin() {
               "mt-2 inline-flex h-9 w-full items-center justify-center rounded-[var(--radius-sm)] text-sm font-medium",
               "bg-[var(--color-accent)] text-[var(--color-accent-fg)]",
               "border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)]",
+              "transition-[transform,border-color] duration-[120ms] ease-out",
               "hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)]",
               "active:translate-y-px",
             )}

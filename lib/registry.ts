@@ -157,6 +157,48 @@ export const REGISTRY: ComponentEntry[] = [
     firstImpression: "2026-05-04",
     load: () => import("@/components/showcase/empty-states/empty-table-suggestions"),
   },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "deploy-pipeline",
+    title: "Deploy pipeline",
+    filename: "deploy-pipeline.tsx",
+    description:
+      "Three environment lanes — preview / staging / production. Each deploy is a dot on a time axis; rollout duration trails behind. Failed deploys ink persimmon, the live deploy wears a Federal Blue ring with the pulse.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    firstImpression: "2026-05-04",
+    load: () => import("@/components/showcase/dashboards/deploy-pipeline"),
+  },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "billing-usage",
+    title: "Estimated bill",
+    filename: "billing-usage.tsx",
+    description:
+      "Typeset-invoice approach to mid-cycle usage. Estimated total set in display Fraunces, line-item table with tabular-num columns and hairline rules, a single 30-day cumulative-spend Trace anchored to the renew-on date.",
+    layout: "specimen",
+    aspectRatio: "5 / 6",
+    maxWidth: 600,
+    firstImpression: "2026-05-04",
+    load: () => import("@/components/showcase/dashboards/billing-usage"),
+  },
+  {
+    domain: "saas",
+    category: "layouts",
+    slug: "command-palette",
+    title: "Command palette",
+    filename: "command-palette.tsx",
+    description:
+      "Open palette modal floating over a softly-dimmed app frame. Grouped results — Pages, Actions, Recents — each row shows glyph, label, and a mono shortcut keycap. Selected row uses a left accent strip plus faint surface, never bg-lighten.",
+    layout: "specimen",
+    aspectRatio: "16 / 10",
+    maxWidth: 880,
+    firstImpression: "2026-05-04",
+    load: () => import("@/components/showcase/layouts/command-palette"),
+  },
 
   // ────────────────────────────────────────────────────────────────────
   //  Medical SaaS — clinical-product surfaces
