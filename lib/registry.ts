@@ -199,6 +199,48 @@ export const REGISTRY: ComponentEntry[] = [
     firstImpression: "2026-05-04",
     load: () => import("@/components/showcase/layouts/command-palette"),
   },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "feature-flags",
+    title: "Feature flags",
+    filename: "feature-flags.tsx",
+    description:
+      "Two-pane master-detail console: flag list left, focused-flag detail right with env matrix, rollout slider, evaluation-volume Trace, and audit log.",
+    layout: "specimen",
+    aspectRatio: "16 / 9",
+    maxWidth: 880,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/dashboards/feature-flags"),
+  },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "api-rate-limits",
+    title: "API rate limits",
+    filename: "api-rate-limits.tsx",
+    description:
+      "Per-endpoint observability surface — quota gauge, per-second histogram, p95 latency, status chip. Hover surfaces detail; status chip toggles throttled state.",
+    layout: "specimen",
+    aspectRatio: "16 / 10",
+    maxWidth: 880,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/dashboards/api-rate-limits"),
+  },
+  {
+    domain: "saas",
+    category: "forms",
+    slug: "api-keys",
+    title: "API keys",
+    filename: "api-keys.tsx",
+    description:
+      "Vertical-stack credential cards. Each card reads as a credential, not a table row: ringed creator monogram, recency trail, scope chips, large masked secret, 7d sparkline, danger-zone rotate/revoke with confirm-by-typing.",
+    layout: "specimen",
+    aspectRatio: "5 / 6",
+    maxWidth: 600,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/forms/api-keys"),
+  },
 
   // ────────────────────────────────────────────────────────────────────
   //  Medical SaaS — clinical-product surfaces

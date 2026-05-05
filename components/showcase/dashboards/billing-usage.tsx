@@ -1,43 +1,23 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
 import { mulberry32 } from "@/components/_kit/dot-noise";
+import { Popover } from "@/components/_kit/popover";
+import { useToast } from "@/components/_kit/toast";
 
 /**
- * REGISTRY:
- * {
- *   domain: "saas",
- *   category: "dashboards",
- *   slug: "billing-usage",
- *   title: "Estimated bill",
- *   filename: "billing-usage.tsx",
- *   description: "Typeset-invoice approach to mid-cycle usage. Estimated total set in display Fraunces, line-item table with tabular-num columns and hairline rules, a single 30-day cumulative-spend Trace anchored to the renew-on date.",
- *   layout: "specimen",
- *   aspectRatio: "5 / 6",
- *   maxWidth: 600,
- *   firstImpression: "2026-05-04",
- * }
- */
-
-/**
- * Estimated bill — alternative to the metered-quota dashboard. The plate is
- * a typeset invoice, not a dashboard: a hero estimated total in display
- * Fraunces, a tabular line-item ledger underneath, and a single cumulative
- * Trace anchored to the renew-on date at the foot. Reads like a printed
- * bill someone would hand you, not a system status panel.
+ * Estimated bill — typeset invoice with mid-cycle usage data.
  *
- * Dot+line commitments specific to this plate:
- *  - Backgrounds beneath data values stay flat. The figure of the plate is
- *    the typesetting itself — column rhythm, tabular numerals, hairline
- *    rules between sections. No halftone ribbons, no in-cell stipple.
- *  - The cumulative-spend Trace is the only line element. Its terminal
- *    Federal Blue dot marks today; a dashed walnut threshold marks the
- *    forecast intercept at cycle close.
- *  - The "estimated" disclaimer is a small mono-caps subhead under the
- *    hero figure; the precision of the figure isn't oversold.
- *
- * Pure server component.
+ * Deep-wire pass (2026-05-04):
+ *  - Hover row → highlight contribution: SpendTrace gets a brushed segment
+ *    overlay restricted via clipPath to that line item's proportional x-range.
+ *    Persimmon ribbon below at 12% opacity in the same range.
+ *  - "Download invoice" button → loading state → loading toast → success toast.
+ *  - "Committed-use credit" row → Popover with credit terms.
+ *  - Section heading collapse: click heading toggles a grid-template-rows
+ *    transition collapsing the rows. Persists to localStorage.
+ *  - Cycle estimate hover scrub: hairline + popover at top with day → spend.
  */
 
 type LineItem = {
@@ -57,72 +37,24 @@ const SECTIONS: Section[] = [
   {
     heading: "Compute",
     items: [
-      {
-        name: "Edge runtime",
-        detail: "GB-hours · over 100 free",
-        used: "1,284 GB-h",
-        rate: "$0.000018",
-        subtotal: 23.11,
-      },
-      {
-        name: "Build minutes",
-        detail: "incremental · over 6,000 free",
-        used: "14,212 min",
-        rate: "$0.0040",
-        subtotal: 56.85,
-      },
-      {
-        name: "Background functions",
-        detail: "invocations · over 1M free",
-        used: "3.42M",
-        rate: "$0.20 / M",
-        subtotal: 6.84,
-      },
+      { name: "Edge runtime", detail: "GB-hours · over 100 free", used: "1,284 GB-h", rate: "$0.000018", subtotal: 23.11 },
+      { name: "Build minutes", detail: "incremental · over 6,000 free", used: "14,212 min", rate: "$0.0040", subtotal: 56.85 },
+      { name: "Background functions", detail: "invocations · over 1M free", used: "3.42M", rate: "$0.20 / M", subtotal: 6.84 },
     ],
   },
   {
     heading: "Bandwidth & storage",
     items: [
-      {
-        name: "Egress",
-        detail: "global · over 100 GB free",
-        used: "842 GB",
-        rate: "$0.150",
-        subtotal: 126.30,
-      },
-      {
-        name: "Asset storage",
-        detail: "blob · billed monthly",
-        used: "412 GB",
-        rate: "$0.023",
-        subtotal: 9.48,
-      },
+      { name: "Egress", detail: "global · over 100 GB free", used: "842 GB", rate: "$0.150", subtotal: 126.30 },
+      { name: "Asset storage", detail: "blob · billed monthly", used: "412 GB", rate: "$0.023", subtotal: 9.48 },
     ],
   },
   {
     heading: "Observability",
     items: [
-      {
-        name: "Log ingest",
-        detail: "structured · 250 GB free",
-        used: "688 GB",
-        rate: "$0.250",
-        subtotal: 109.50,
-      },
-      {
-        name: "Trace events",
-        detail: "spans · 5M free",
-        used: "12.4M",
-        rate: "$1.30 / M",
-        subtotal: 9.62,
-      },
-      {
-        name: "Alerts",
-        detail: "destinations · flat",
-        used: "4 active",
-        rate: "$0.12 ea",
-        subtotal: 0.48,
-      },
+      { name: "Log ingest", detail: "structured · 250 GB free", used: "688 GB", rate: "$0.250", subtotal: 109.50 },
+      { name: "Trace events", detail: "spans · 5M free", used: "12.4M", rate: "$1.30 / M", subtotal: 9.62 },
+      { name: "Alerts", detail: "destinations · flat", used: "4 active", rate: "$0.12 ea", subtotal: 0.48 },
     ],
   },
 ];
@@ -132,43 +64,98 @@ function sectionSubtotal(s: Section): number {
 }
 
 const SUBTOTAL = SECTIONS.reduce((acc, s) => acc + sectionSubtotal(s), 0);
-const CREDITS = -16.00; // committed-use discount
+const CREDITS = -16.00;
 const TOTAL = Math.round((SUBTOTAL + CREDITS) * 100) / 100;
 
-/** 30-day cumulative spend, ending today (day 18 of cycle). The trace
- *  is scaled at the end so its terminal y-value equals TOTAL exactly —
- *  hero figure and chart's last point must agree. */
 function cumulativeSpend(): TracePoint[] {
   const rng = mulberry32(417);
   const raw: number[] = [];
   let total = 0;
   for (let day = 0; day < 18; day++) {
-    // ~$18-22 per day with weekend dips.
     const weekend = day % 7 === 5 || day % 7 === 6;
     const daily = (weekend ? 8 : 22) + (rng() - 0.5) * 6;
     total += daily;
     raw.push(total);
   }
-  // Scale so the final cumulative value equals TOTAL exactly.
   const scale = TOTAL / raw[raw.length - 1];
   return raw.map((y, day) => ({ x: day, y: y * scale }));
 }
 
 const TRACE_DATA = cumulativeSpend();
 const TODAY_TOTAL = TRACE_DATA[TRACE_DATA.length - 1].y;
-// Linear extrapolation to day 30.
 const PROJECTED_TOTAL = (TODAY_TOTAL / 18) * 30;
-
 const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
+const COLLAPSE_KEY = "stipple.billing.collapsed";
+
+/** Compute the proportional x-range a line item contributes to the cumulative
+ *  trace. We map each item's subtotal share of SUBTOTAL into a (start, end)
+ *  fraction of x ∈ [0, 18] (today). Line items appear in document order. */
+function itemRangesByLabel(): Map<string, { start: number; end: number }> {
+  const map = new Map<string, { start: number; end: number }>();
+  let acc = 0;
+  for (const sec of SECTIONS) {
+    for (const it of sec.items) {
+      const start = acc;
+      acc += it.subtotal;
+      const end = acc;
+      map.set(it.name, {
+        start: (start / SUBTOTAL) * 18,
+        end: (end / SUBTOTAL) * 18,
+      });
+    }
+  }
+  return map;
+}
+
+const ITEM_RANGES = itemRangesByLabel();
+
 export default function BillingUsageAlt() {
-  // In-view gate — fires once per session via IntersectionObserver. Drives
-  // both the hero-total reveal and the cumulative-spend trace draw. The
-  // hero leads the trace by ~30ms so the eye lands on the figure before
-  // the line moves.
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [inView, setInView] = useState(false);
   const firedRef = useRef(false);
+
+  // Section collapse state.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(COLLAPSE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") setCollapsed(parsed as Record<string, boolean>);
+      }
+    } catch {
+      /* swallow */
+    }
+  }, []);
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsed));
+    } catch {
+      /* swallow */
+    }
+  }, [collapsed]);
+
+  const toggleCollapse = (heading: string) =>
+    setCollapsed((prev) => ({ ...prev, [heading]: !prev[heading] }));
+
+  // Hover-row highlight.
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+  const hoverRange = hoveredItem ? ITEM_RANGES.get(hoveredItem) ?? null : null;
+
+  // Download toast id (stable across the simulated lifecycle).
+  const { toast, update } = useToast();
+  const [downloading, setDownloading] = useState(false);
+
+  const onDownload = () => {
+    if (downloading) return;
+    setDownloading(true);
+    const id = toast({ title: "Generating PDF…", status: "loading" });
+    window.setTimeout(() => {
+      update(id, { title: "Downloaded INV-2026-05.pdf", status: "success", duration: 2500 });
+      setDownloading(false);
+    }, 800);
+  };
 
   useEffect(() => {
     if (firedRef.current) return;
@@ -197,20 +184,27 @@ export default function BillingUsageAlt() {
       className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]"
     >
       <div className="flex h-full flex-col">
-        {/* Running head */}
+        {/* Running head + Download button */}
         <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-2">
           <span className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
             Invoice · estimate · cycle ends May 14
           </span>
-          <span className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-            Acme Inc · INV-2026-05
-          </span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+              Acme Inc · INV-2026-05
+            </span>
+            <button
+              type="button"
+              onClick={onDownload}
+              disabled={downloading}
+              className="inline-flex h-6 items-center rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-text)] hover:border-[var(--color-border-strong)] disabled:opacity-50"
+            >
+              {downloading ? "Generating…" : "Download"}
+            </button>
+          </div>
         </div>
 
-        {/* Hero total — single 320ms paper-ease reveal on first viewport
-            entry: opacity 0→1 + translateY(4px)→0. Leads the trace draw
-            by ~30ms so the figure registers first. No stagger; everything
-            else (running head, ledger, colophon) renders normally. */}
+        {/* Hero total */}
         <div
           className="flex shrink-0 flex-col items-center justify-center px-6 pb-3 pt-6"
           style={{
@@ -227,7 +221,6 @@ export default function BillingUsageAlt() {
           </p>
         </div>
 
-        {/* Hairline before the ledger */}
         <div className="mx-6 h-px shrink-0 bg-[var(--color-border-strong)]" />
 
         {/* Line items */}
@@ -255,56 +248,99 @@ export default function BillingUsageAlt() {
                 </th>
               </tr>
             </thead>
-            {SECTIONS.map((s, si) => (
-              <tbody key={s.heading}>
-                {/* Section heading row — Fraunces italic small caps */}
-                <tr>
-                  <td colSpan={4} className="border-t border-[var(--color-border)] pb-1 pt-3">
-                    <span
-                      className="font-display text-[12px] italic text-[var(--color-text)]"
-                      style={{
-                        fontVariationSettings: '"opsz" 18, "SOFT" 30',
-                        letterSpacing: "0.02em",
-                      }}
-                    >
-                      {s.heading}.
-                    </span>
-                  </td>
-                </tr>
-                {s.items.map((it) => (
-                  <tr key={it.name}>
-                    <td className="py-1 align-top">
-                      <div className="text-[12px] text-[var(--color-text)]">
-                        {it.name}
-                      </div>
-                      <div className="font-mono text-[10px] text-[var(--color-text-muted)]">
-                        {it.detail}
-                      </div>
-                    </td>
-                    <td className="py-1 text-right align-top font-mono text-[11px] tabular-nums text-[var(--color-text)]">
-                      {it.used}
-                    </td>
-                    <td className="py-1 text-right align-top font-mono text-[11px] tabular-nums text-[var(--color-text-muted)]">
-                      {it.rate}
-                    </td>
-                    <td className="py-1 text-right align-top font-mono text-[12px] tabular-nums text-[var(--color-text)]">
-                      {fmtUsd(it.subtotal)}
+            {SECTIONS.map((s) => {
+              const isCollapsed = !!collapsed[s.heading];
+              return (
+                <tbody key={s.heading}>
+                  {/* Section heading row — clickable */}
+                  <tr>
+                    <td colSpan={4} className="border-t border-[var(--color-border)] pb-1 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => toggleCollapse(s.heading)}
+                        aria-expanded={!isCollapsed}
+                        className="inline-flex w-full items-center justify-between text-left"
+                      >
+                        <span
+                          className="font-display text-[12px] italic text-[var(--color-text)]"
+                          style={{
+                            fontVariationSettings: '"opsz" 18, "SOFT" 30',
+                            letterSpacing: "0.02em",
+                          }}
+                        >
+                          {s.heading}.
+                        </span>
+                        <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+                          {isCollapsed ? "show" : "hide"}
+                        </span>
+                      </button>
                     </td>
                   </tr>
-                ))}
-                {/* Section subtotal */}
-                <tr>
-                  <td colSpan={3} className="pt-1 text-right font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
-                    {s.heading} subtotal
-                  </td>
-                  <td className="pt-1 text-right font-mono text-[12px] tabular-nums text-[var(--color-text)]">
-                    {fmtUsd(sectionSubtotal(s))}
-                  </td>
-                </tr>
-              </tbody>
-            ))}
-            {/* Subtotal / credits / total — separated by spacing only;
-                the single strong rule lives above Estimated total. */}
+                  {/* Collapsible body — wrap rows in a single tr+td that holds
+                      a div with grid-template-rows transition. */}
+                  <tr>
+                    <td colSpan={4} className="p-0">
+                      <div
+                        className="grid transition-[grid-template-rows] duration-[200ms] ease-out"
+                        style={{ gridTemplateRows: isCollapsed ? "0fr" : "1fr" }}
+                      >
+                        <div className="overflow-hidden">
+                          <table className="w-full table-fixed text-[12px] tabular-nums">
+                            <colgroup>
+                              <col style={{ width: "44%" }} />
+                              <col style={{ width: "20%" }} />
+                              <col style={{ width: "18%" }} />
+                              <col style={{ width: "18%" }} />
+                            </colgroup>
+                            <tbody>
+                              {s.items.map((it) => (
+                                <tr
+                                  key={it.name}
+                                  onMouseEnter={() => setHoveredItem(it.name)}
+                                  onMouseLeave={() =>
+                                    setHoveredItem((prev) =>
+                                      prev === it.name ? null : prev,
+                                    )
+                                  }
+                                  className="transition-[background-color] duration-[120ms] ease-out hover:bg-[color-mix(in_oklch,var(--color-accent-2)_4%,transparent)]"
+                                >
+                                  <td className="py-1 align-top">
+                                    <div className="text-[12px] text-[var(--color-text)]">
+                                      {it.name}
+                                    </div>
+                                    <div className="font-mono text-[10px] text-[var(--color-text-muted)]">
+                                      {it.detail}
+                                    </div>
+                                  </td>
+                                  <td className="py-1 text-right align-top font-mono text-[11px] tabular-nums text-[var(--color-text)]">
+                                    {it.used}
+                                  </td>
+                                  <td className="py-1 text-right align-top font-mono text-[11px] tabular-nums text-[var(--color-text-muted)]">
+                                    {it.rate}
+                                  </td>
+                                  <td className="py-1 text-right align-top font-mono text-[12px] tabular-nums text-[var(--color-text)]">
+                                    {fmtUsd(it.subtotal)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                  {/* Section subtotal — stays visible even when collapsed */}
+                  <tr>
+                    <td colSpan={3} className="pt-1 text-right font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+                      {s.heading} subtotal
+                    </td>
+                    <td className="pt-1 text-right font-mono text-[12px] tabular-nums text-[var(--color-text)]">
+                      {fmtUsd(sectionSubtotal(s))}
+                    </td>
+                  </tr>
+                </tbody>
+              );
+            })}
             <tbody>
               <tr>
                 <td colSpan={3} className="pt-2 text-right font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
@@ -315,8 +351,30 @@ export default function BillingUsageAlt() {
                 </td>
               </tr>
               <tr>
-                <td colSpan={3} className="text-right font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
-                  Committed-use credit
+                <td colSpan={3} className="text-right">
+                  <Popover
+                    placement="top"
+                    align="end"
+                    ariaLabel="Committed-use credit details"
+                    trigger={
+                      <button
+                        type="button"
+                        className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] underline decoration-dotted decoration-[var(--color-accent-2)] underline-offset-2 hover:text-[var(--color-text)]"
+                      >
+                        Committed-use credit
+                      </button>
+                    }
+                  >
+                    <div className="w-[260px] px-3 py-2.5">
+                      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+                        Credit terms
+                      </div>
+                      <p className="mt-1 text-[13px] text-[var(--color-text)]">
+                        20% off compute, locked through 2026-12-31. 12 months
+                        remaining.
+                      </p>
+                    </div>
+                  </Popover>
                 </td>
                 <td className="text-right font-mono text-[12px] tabular-nums text-[var(--color-text)]">
                   {fmtUsd(CREDITS)}
@@ -357,7 +415,7 @@ export default function BillingUsageAlt() {
             </span>
           </div>
           <div className="mt-2">
-            <SpendTrace inView={inView} />
+            <SpendTrace inView={inView} hoverRange={hoverRange} />
             <div className="mt-1 flex justify-between font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] tabular-nums">
               <span>Apr 24</span>
               <span>today · May 11</span>
@@ -373,26 +431,24 @@ export default function BillingUsageAlt() {
   );
 }
 
-/**
- * Cumulative-spend Trace with the in-view draw. On first viewport entry
- * the trend's stroke-dashoffset transitions from full-length → 0 over
- * 320ms paper-ease; the terminal Federal Blue dot fades opacity 0 → 1
- * over 120ms once the line completes. The forecast intercept dot at
- * x=30 stays STATIC (projected, not actual) — we identify the two dots
- * by index in the SVG and animate only the first.
- */
-function SpendTrace({ inView }: { inView: boolean }) {
+function SpendTrace({
+  inView,
+  hoverRange,
+}: {
+  inView: boolean;
+  hoverRange: { start: number; end: number } | null;
+}) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [scrub, setScrub] = useState<number | null>(null);
 
   useEffect(() => {
     if (!inView) return;
     const node = wrapRef.current;
     if (!node) return;
-
     const path = node.querySelector<SVGPathElement>("path[fill='none']");
     const circles = Array.from(node.querySelectorAll<SVGCircleElement>("circle"));
     if (!path) return;
-
     const len = (() => {
       try {
         return path.getTotalLength();
@@ -400,13 +456,8 @@ function SpendTrace({ inView }: { inView: boolean }) {
         return 0;
       }
     })();
-
-    // Trace renders dots in declaration order. Dot 0 = terminal Federal Blue
-    // (animated). Dot 1 = forecast intercept at x=30 (static — projected,
-    // not actual). Hide only the terminal dot up front.
     const terminalDot = circles[0];
     if (terminalDot) terminalDot.style.opacity = "0";
-
     if (len <= 0) {
       if (terminalDot) {
         terminalDot.style.transition = "opacity 120ms ease-out";
@@ -414,14 +465,10 @@ function SpendTrace({ inView }: { inView: boolean }) {
       }
       return;
     }
-
     path.style.transition = "none";
     path.style.strokeDasharray = `${len}`;
     path.style.strokeDashoffset = `${len}`;
     void path.getBoundingClientRect();
-
-    // Hero total leads by 30ms — we delay the trace draw that long so the
-    // eye lands on the figure first.
     const TRACE_LEAD = 30;
     const t1 = window.setTimeout(() => {
       path.style.transition = `stroke-dashoffset 320ms ${PAPER_EASE}`;
@@ -433,53 +480,139 @@ function SpendTrace({ inView }: { inView: boolean }) {
         terminalDot.style.opacity = "1";
       }
     }, TRACE_LEAD + 320);
-
     return () => {
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };
   }, [inView]);
 
+  // Scrub handlers — track pointer-x as a fraction of container width.
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const node = containerRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const t = (e.clientX - rect.left) / rect.width;
+    if (t < 0 || t > 1) {
+      setScrub(null);
+      return;
+    }
+    const day = Math.round(t * 30);
+    if (day > 17) {
+      // beyond today — don't scrub future.
+      setScrub(null);
+      return;
+    }
+    setScrub(day);
+  };
+  const onPointerLeave = () => setScrub(null);
+
+  const scrubValue = scrub != null ? TRACE_DATA[Math.min(17, scrub)].y : null;
+
+  // Geometry for overlay segment + ribbon.
+  const W = 520;
+  const H = 42;
+
   return (
-    <div ref={wrapRef}>
-      <Trace
-        data={TRACE_DATA}
-        width={520}
-        height={42}
-        xDomain={[0, 30]}
-        yDomain={[0, PROJECTED_TOTAL * 1.08]}
-        smooth
-        strokeColor="var(--color-text)"
-        strokeWidth={1}
-        thresholds={[
-          {
-            y: PROJECTED_TOTAL,
-            dashed: true,
-            color: "var(--color-accent-2)",
-          },
-        ]}
-        dots={[
-          {
-            index: TRACE_DATA.length - 1,
-            color: "var(--color-accent-2)",
-            radius: 2.2,
-          },
-          {
-            x: 30,
-            y: PROJECTED_TOTAL,
-            color: "var(--color-accent-2)",
-            radius: 1.4,
-          },
-        ]}
-        className="block w-full"
-        ariaLabel="Cumulative spend this cycle"
-      />
+    <div
+      ref={containerRef}
+      className="relative"
+      onPointerMove={onPointerMove}
+      onPointerLeave={onPointerLeave}
+      style={{ touchAction: "none" }}
+    >
+      <div ref={wrapRef}>
+        <Trace
+          data={TRACE_DATA}
+          width={W}
+          height={H}
+          xDomain={[0, 30]}
+          yDomain={[0, PROJECTED_TOTAL * 1.08]}
+          smooth
+          strokeColor="var(--color-text)"
+          strokeWidth={1}
+          thresholds={[
+            {
+              y: PROJECTED_TOTAL,
+              dashed: true,
+              color: "var(--color-accent-2)",
+            },
+          ]}
+          dots={[
+            {
+              index: TRACE_DATA.length - 1,
+              color: "var(--color-accent-2)",
+              radius: 2.2,
+            },
+            {
+              x: 30,
+              y: PROJECTED_TOTAL,
+              color: "var(--color-accent-2)",
+              radius: 1.4,
+            },
+          ]}
+          className="block w-full"
+          ariaLabel="Cumulative spend this cycle"
+        />
+      </div>
+
+      {/* Highlight overlay — Federal Blue brushed segment + persimmon ribbon
+          below. Position via percent so it scales with the container. */}
+      {hoverRange && (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 transition-opacity duration-[120ms] ease-out"
+            style={{
+              left: `${(hoverRange.start / 30) * 100}%`,
+              width: `${((hoverRange.end - hoverRange.start) / 30) * 100}%`,
+              background: "color-mix(in oklch, var(--color-accent) 12%, transparent)",
+              opacity: 1,
+            }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 transition-opacity duration-[120ms] ease-out"
+            style={{
+              left: `${(hoverRange.start / 30) * 100}%`,
+              width: `${((hoverRange.end - hoverRange.start) / 30) * 100}%`,
+              height: 1,
+              top: "50%",
+              background: "var(--color-accent-2)",
+              opacity: 0.9,
+            }}
+          />
+        </>
+      )}
+
+      {/* Scrub hairline + popover bubble. */}
+      {scrub != null && (
+        <>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0"
+            style={{
+              left: `${(scrub / 30) * 100}%`,
+              width: 1,
+              background: "var(--color-accent-2)",
+              opacity: 0.85,
+            }}
+          />
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -translate-x-1/2 -translate-y-full rounded-[var(--radius-xs)] border border-[var(--color-border-strong)] bg-[var(--color-bg)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text)]"
+            style={{
+              left: `${(scrub / 30) * 100}%`,
+              top: -6,
+            }}
+          >
+            day {scrub + 1} · {fmtUsd(scrubValue ?? 0)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-/** The hero figure. Fraunces italic, opsz 96 for display weight.
- *  $ and cents are <sup>-style superscripts on the integer figure. */
 function Total({ amount }: { amount: number }) {
   const dollars = Math.floor(amount);
   const cents = Math.round((amount - dollars) * 100);

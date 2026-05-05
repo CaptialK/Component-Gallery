@@ -1,63 +1,183 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight, Check, Pencil } from "lucide-react";
+import { FieldError } from "@/components/_kit/field-error";
 import { cn } from "@/lib/cn";
 
 /**
- * Onboarding accordion — same three-step set-up as the wizard, stacked
- * vertically with all sections visible at once. Completed steps collapse
- * to a single line plus an Edit affordance; the active step is fully
- * open; future steps are dimmed and locked.
+ * Onboarding accordion — three-step set-up stacked vertically.
  *
- * Dot+line commitments specific to this plate:
- *  - Reading direction is top-to-bottom; the page reads as a typeset
- *    document — done above, doing now in the middle, doing-next below.
- *  - Section status is encoded by glyph (Federal Blue check / walnut
- *    filled dot / dim hollow ring) and by ink level — no colour-only.
- *  - The active section's "Continue" button lives inside the section,
- *    not as a global footer. The chrome reads as one form-document
- *    rather than a wizard with separate panes.
- *  - All form chrome inherits the global Spike-1 focus halo; no
- *    per-input dot decoration.
- *
- * Client component (uses local state for the active step). Default to
- * step 2 — step 1 is shown completed with its summary, step 2 is the
- * active form, step 3 is the dimmed future state.
+ * Interactivity pass:
+ *  - Field-level validation per step (FieldError); first invalid focus on
+ *    Save & continue; aria-invalid + aria-describedby coordinated.
+ *  - 200ms loading state on Save & continue before advancing.
+ *  - Form values lifted to parent state, persisted across steps and to
+ *    localStorage. Future-step preview inputs are disabled previews; if
+ *    the user has past-edited and come back, real values are pre-filled.
+ *  - "editing previous step" pill appears at top while a done step is open.
+ *  - Final step's Save → `complete` state with cross-fade summary.
  */
 
 type StepKey = "account" | "workspace" | "invite";
-
 const ORDER: StepKey[] = ["account", "workspace", "invite"];
+const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
 const TITLES: Record<StepKey, string> = {
   account: "Create your account",
   workspace: "Name your workspace",
   invite: "Invite your team",
 };
-
-const SUMMARIES: Record<StepKey, string> = {
-  account: "Mara Reyes · mara@stipple.lab",
-  workspace: "Stipple Press · stipple.lab/stipple-press",
-  invite: "3 invitations queued",
-};
-
-/** Hint text shown for steps that haven't started yet — gives a peek at
- *  what's coming so the future state isn't a black box. */
 const PREVIEWS: Record<StepKey, string> = {
   account: "Name, work email, password.",
   workspace: "Workspace name, URL slug.",
   invite: "Teammate emails — magic-link invites.",
 };
 
+type Values = {
+  account: { name: string; email: string };
+  workspace: { name: string; slug: string };
+  invite: { emails: string };
+};
+
+type Errors = Partial<{
+  "account.name": string;
+  "account.email": string;
+  "workspace.name": string;
+  "workspace.slug": string;
+  "invite.emails": string;
+}>;
+
+const INITIAL_VALUES: Values = {
+  account: { name: "Mara Reyes", email: "mara@stipple.lab" },
+  workspace: { name: "Stipple Press", slug: "stipple-press" },
+  invite: { emails: "" },
+};
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SLUG_RE = /^[a-z0-9-]+$/;
+const STORAGE_KEY = "stipple.onboarding";
+
+function validate(step: StepKey, values: Values): Errors {
+  const e: Errors = {};
+  if (step === "account") {
+    if (!values.account.name || values.account.name.trim().length < 2)
+      e["account.name"] = "At least 2 characters.";
+    if (!EMAIL_RE.test(values.account.email))
+      e["account.email"] = "Enter a valid email.";
+  } else if (step === "workspace") {
+    if (!values.workspace.name.trim())
+      e["workspace.name"] = "Required.";
+    if (!values.workspace.slug || values.workspace.slug.length < 3)
+      e["workspace.slug"] = "At least 3 characters.";
+    else if (!SLUG_RE.test(values.workspace.slug))
+      e["workspace.slug"] = "Lowercase letters, numbers, and hyphens only.";
+  } else if (step === "invite") {
+    const lines = values.invite.emails
+      .split(/\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const bad = lines.find((l) => !EMAIL_RE.test(l));
+    if (bad) e["invite.emails"] = `"${bad}" is not a valid email.`;
+  }
+  return e;
+}
+
+function summary(step: StepKey, v: Values): string {
+  if (step === "account") return `${v.account.name} · ${v.account.email}`;
+  if (step === "workspace")
+    return `${v.workspace.name} · stipple.lab/${v.workspace.slug}`;
+  const lines = v.invite.emails
+    .split(/\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  return lines.length === 0
+    ? "No invitations queued"
+    : `${lines.length} invitation${lines.length === 1 ? "" : "s"} queued`;
+}
+
 export default function OnboardingAccordion() {
   const [active, setActive] = useState<StepKey>("workspace");
+  const [values, setValues] = useState<Values>(INITIAL_VALUES);
+  const [furthest, setFurthest] = useState<StepKey>("workspace");
+  const [errors, setErrors] = useState<Errors>({});
+  const [savingStep, setSavingStep] = useState<StepKey | null>(null);
+  const [editingPrior, setEditingPrior] = useState(false);
+  const [complete, setComplete] = useState(false);
+
+  // Hydrate from localStorage once
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        setValues((v) => ({ ...v, ...parsed }));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Persist on change
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+    } catch {
+      /* ignore */
+    }
+  }, [values]);
+
   const activeIdx = ORDER.indexOf(active);
+  const furthestIdx = ORDER.indexOf(furthest);
+
+  function setActiveStep(key: StepKey) {
+    setActive(key);
+    const idx = ORDER.indexOf(key);
+    setEditingPrior(idx < furthestIdx);
+  }
+
+  function onContinue(stepKey: StepKey) {
+    const errs = validate(stepKey, values);
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      // Focus first invalid input.
+      const firstKey = Object.keys(errs)[0];
+      const id = `f-${firstKey.replace(".", "-")}`;
+      const el = document.getElementById(id);
+      if (el && "focus" in el) (el as HTMLElement).focus();
+      return;
+    }
+    setSavingStep(stepKey);
+    setTimeout(() => {
+      setSavingStep(null);
+      const idx = ORDER.indexOf(stepKey);
+      const next = ORDER[idx + 1];
+      // Bump furthest if advancing
+      if (idx + 1 > furthestIdx) {
+        const newFurthest = next ?? stepKey;
+        setFurthest(newFurthest);
+      }
+      if (next) {
+        setActive(next);
+        setEditingPrior(false);
+      } else {
+        // Final step → complete state
+        setComplete(true);
+        setEditingPrior(false);
+      }
+    }, 200);
+  }
+
+  if (complete) {
+    return <CompleteSummary values={values} onReset={() => setComplete(false)} />;
+  }
 
   return (
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
       <div className="mx-auto flex h-full w-full max-w-[460px] flex-col px-6 py-9">
-        {/* Header */}
         <header>
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
             Three steps · take your time
@@ -70,21 +190,39 @@ export default function OnboardingAccordion() {
           </h1>
         </header>
 
+        {editingPrior && (
+          <div
+            className="mt-4 inline-flex w-fit items-center gap-1.5 rounded-[var(--radius-xs)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]"
+          >
+            <span
+              aria-hidden
+              className="block h-1 w-1 rounded-full"
+              style={{ background: "var(--color-accent-2)" }}
+            />
+            editing previous step
+          </div>
+        )}
+
         <ol className="mt-8 space-y-3">
           {ORDER.map((key, i) => {
-            const status =
-              i < activeIdx ? "done" : i === activeIdx ? "active" : "future";
+            const status: "done" | "active" | "future" =
+              i < furthestIdx && i !== activeIdx
+                ? "done"
+                : i === activeIdx
+                  ? "active"
+                  : "future";
             return (
               <Section
                 key={key}
                 index={i + 1}
                 stepKey={key}
                 status={status}
-                onEdit={() => setActive(key)}
-                onContinue={() => {
-                  const next = ORDER[i + 1];
-                  if (next) setActive(next);
-                }}
+                values={values}
+                setValues={setValues}
+                errors={errors}
+                saving={savingStep === key}
+                onEdit={() => setActiveStep(key)}
+                onContinue={() => onContinue(key)}
               />
             );
           })}
@@ -104,16 +242,98 @@ export default function OnboardingAccordion() {
   );
 }
 
+function CompleteSummary({
+  values,
+  onReset,
+}: {
+  values: Values;
+  onReset: () => void;
+}) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShown(true), 0);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div className="grid h-full w-full place-items-center bg-[var(--color-bg)] text-[var(--color-text)]">
+      <div
+        className="w-full max-w-[460px] px-6"
+        style={{
+          opacity: shown ? 1 : 0,
+          transition: `opacity 200ms ${PAPER_EASE}`,
+        }}
+      >
+        <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+          Done
+        </div>
+        <h1
+          className="mt-2 font-display text-[28px] italic leading-tight tracking-[-0.022em] text-[var(--color-text)]"
+          style={{ fontVariationSettings: '"opsz" 48, "SOFT" 30' }}
+        >
+          Workspace ready.
+        </h1>
+
+        <ol className="mt-6 space-y-2">
+          {ORDER.map((k) => (
+            <li
+              key={k}
+              className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2"
+            >
+              <span
+                className="grid h-6 w-6 place-items-center rounded-full text-[var(--color-accent-fg)] ring-2 ring-[var(--color-bg)]"
+                style={{ background: "var(--color-accent-2)" }}
+              >
+                <Check size={12} strokeWidth={2} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="text-[13px]">{TITLES[k]}</div>
+                <div className="truncate text-[11.5px] text-[var(--color-text-muted)]">
+                  {summary(k, values)}
+                </div>
+              </div>
+            </li>
+          ))}
+        </ol>
+
+        <div className="mt-6 flex items-center gap-3">
+          <button
+            type="button"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-[13px] text-[var(--color-accent-fg)] transition-[transform,border-color] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
+          >
+            Open workspace
+            <ArrowRight size={13} strokeWidth={1.8} />
+          </button>
+          <button
+            type="button"
+            onClick={onReset}
+            className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          >
+            edit again
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Section({
   index,
   stepKey,
   status,
+  values,
+  setValues,
+  errors,
+  saving,
   onEdit,
   onContinue,
 }: {
   index: number;
   stepKey: StepKey;
   status: "done" | "active" | "future";
+  values: Values;
+  setValues: React.Dispatch<React.SetStateAction<Values>>;
+  errors: Errors;
+  saving: boolean;
   onEdit: () => void;
   onContinue: () => void;
 }) {
@@ -142,7 +362,7 @@ function Section({
           </div>
           {status === "done" && (
             <div className="mt-0.5 truncate text-[11.5px] text-[var(--color-text-muted)]">
-              {SUMMARIES[stepKey]}
+              {summary(stepKey, values)}
             </div>
           )}
           {status === "future" && (
@@ -165,13 +385,11 @@ function Section({
         )}
       </header>
 
-      {/* Active body — gated via grid-template-rows 0fr↔1fr so opening/closing
-          is a pure-CSS height transition, no JS measuring. */}
       <div
         className="grid overflow-hidden transition-[grid-template-rows] duration-[200ms]"
         style={{
           gridTemplateRows: status === "active" ? "1fr" : "0fr",
-          transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)",
+          transitionTimingFunction: PAPER_EASE,
         }}
         aria-hidden={status !== "active"}
       >
@@ -179,35 +397,58 @@ function Section({
           className="min-h-0 transition-opacity duration-[200ms]"
           style={{
             opacity: status === "active" ? 1 : 0,
-            transitionTimingFunction: "cubic-bezier(0.32, 0.72, 0, 1)",
+            transitionTimingFunction: PAPER_EASE,
           }}
         >
           <div className="border-t border-[var(--color-border)] px-4 py-4">
-            {stepKey === "account" && <AccountStep />}
-            {stepKey === "workspace" && <WorkspaceStep />}
-            {stepKey === "invite" && <InviteStep />}
+            {stepKey === "account" && (
+              <AccountStep values={values} setValues={setValues} errors={errors} disabled={false} />
+            )}
+            {stepKey === "workspace" && (
+              <WorkspaceStep values={values} setValues={setValues} errors={errors} disabled={false} />
+            )}
+            {stepKey === "invite" && (
+              <InviteStep values={values} setValues={setValues} errors={errors} disabled={false} />
+            )}
             <div className="mt-4 flex justify-end">
               <button
                 type="button"
                 onClick={onContinue}
-                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-[13px] text-[var(--color-accent-fg)] transition-[transform,border-color] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px"
+                disabled={saving}
+                className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent)_70%,#000_8%)] bg-[var(--color-accent)] px-3 text-[13px] text-[var(--color-accent-fg)] transition-[transform,border-color,opacity] duration-[120ms] ease-out hover:border-[color-mix(in_oklch,var(--color-accent)_60%,#000_18%)] active:translate-y-px disabled:opacity-90 disabled:active:translate-y-0"
               >
-                Save &amp; continue
-                <ArrowRight size={13} strokeWidth={1.8} />
+                {saving ? (
+                  <>
+                    <span
+                      aria-hidden
+                      className="inline-block h-1.5 w-1.5 animate-live-pulse rounded-full"
+                      style={{ background: "var(--color-accent-2)" }}
+                    />
+                    Saving…
+                  </>
+                ) : (
+                  <>
+                    Save &amp; continue
+                    <ArrowRight size={13} strokeWidth={1.8} />
+                  </>
+                )}
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Future step — show a dimmed preview of the form so the reader sees
-          what's coming, not just a title. Inputs are disabled; the section
-          isn't really collapsed, it's just deferred. */}
       {status === "future" && (
         <div className="border-t border-[var(--color-border)] px-4 py-4">
-          {stepKey === "account" && <AccountStep />}
-          {stepKey === "workspace" && <WorkspaceStep />}
-          {stepKey === "invite" && <InviteStep />}
+          {stepKey === "account" && (
+            <AccountStep values={values} setValues={setValues} errors={{}} disabled />
+          )}
+          {stepKey === "workspace" && (
+            <WorkspaceStep values={values} setValues={setValues} errors={{}} disabled />
+          )}
+          {stepKey === "invite" && (
+            <InviteStep values={values} setValues={setValues} errors={{}} disabled />
+          )}
         </div>
       )}
     </li>
@@ -221,13 +462,6 @@ function StatusGlyph({
   status: "done" | "active" | "future";
   index: number;
 }) {
-  // z-10 + ring matching the surface bg knocks out the connecting thread
-  // behind each glyph, so the line reads as "thread connects steps" rather
-  // than "line passes through bullets."
-  // Future state is structurally distinct (border + bg-bg), so it returns
-  // its own element. done↔active share a filled disc element so background
-  // colour can transition between persimmon and Federal Blue, with the
-  // Check fading in over the same 200ms.
   if (status === "future") {
     return (
       <span className="relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full border border-[var(--color-border-strong)] bg-[var(--color-bg)] font-mono text-[12px] text-[var(--color-text-muted)] ring-2 ring-[var(--color-bg)]">
@@ -265,11 +499,13 @@ function Field({
   label,
   htmlFor,
   hint,
+  error,
   children,
 }: {
   label: string;
   htmlFor: string;
   hint?: string;
+  error?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -281,45 +517,128 @@ function Field({
         {label}
       </label>
       {children}
-      {hint && (
+      {error ? (
+        <FieldError id={`${htmlFor}-error`}>{error}</FieldError>
+      ) : hint ? (
         <p className="mt-1 text-[11px] text-[var(--color-text-muted)]">{hint}</p>
-      )}
+      ) : null}
     </div>
   );
 }
 
-function input() {
-  return "mt-1.5 h-9 w-full rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 text-sm placeholder:text-[var(--color-text-muted)] focus:border-[var(--color-border-strong)] focus:outline-none";
+function inputCls(invalid: boolean) {
+  return cn(
+    "mt-1.5 h-9 w-full rounded-[var(--radius-sm)] border bg-[var(--color-bg)] px-2.5 text-sm placeholder:text-[var(--color-text-muted)] focus:outline-none disabled:opacity-70",
+    invalid
+      ? "border-[var(--color-accent)] focus:border-[var(--color-accent)]"
+      : "border-[var(--color-border)] focus:border-[var(--color-border-strong)]",
+  );
 }
 
-function AccountStep() {
+type StepProps = {
+  values: Values;
+  setValues: React.Dispatch<React.SetStateAction<Values>>;
+  errors: Errors;
+  disabled: boolean;
+};
+
+// Disabled previews mustn't share input ids with the active step — that would
+// duplicate ids in the DOM (invalid HTML; breaks aria-describedby targeting).
+function fieldId(key: string, disabled: boolean): string {
+  return `f-${key}${disabled ? "-preview" : ""}`;
+}
+
+function AccountStep({ values, setValues, errors, disabled }: StepProps) {
+  const nameId = fieldId("account-name", disabled);
+  const emailId = fieldId("account-email", disabled);
   return (
     <>
-      <Field label="Full name" htmlFor="acc-name">
-        <input id="acc-name" className={input()} placeholder="Mara Reyes" />
+      <Field label="Full name" htmlFor={nameId} error={errors["account.name"]}>
+        <input
+          id={nameId}
+          disabled={disabled}
+          aria-invalid={Boolean(errors["account.name"])}
+          aria-describedby={errors["account.name"] ? `${nameId}-error` : undefined}
+          value={values.account.name}
+          onChange={(e) =>
+            setValues((v) => ({ ...v, account: { ...v.account, name: e.target.value } }))
+          }
+          className={inputCls(Boolean(errors["account.name"]))}
+          placeholder="Mara Reyes"
+        />
       </Field>
-      <Field label="Work email" htmlFor="acc-email">
-        <input id="acc-email" type="email" className={input()} placeholder="you@company.com" />
+      <Field label="Work email" htmlFor={emailId} error={errors["account.email"]}>
+        <input
+          id={emailId}
+          type="email"
+          disabled={disabled}
+          aria-invalid={Boolean(errors["account.email"])}
+          aria-describedby={errors["account.email"] ? `${emailId}-error` : undefined}
+          value={values.account.email}
+          onChange={(e) =>
+            setValues((v) => ({ ...v, account: { ...v.account, email: e.target.value } }))
+          }
+          className={inputCls(Boolean(errors["account.email"]))}
+          placeholder="you@company.com"
+        />
       </Field>
     </>
   );
 }
 
-function WorkspaceStep() {
+function WorkspaceStep({ values, setValues, errors, disabled }: StepProps) {
+  const slugInvalid = Boolean(errors["workspace.slug"]);
+  const nameId = fieldId("workspace-name", disabled);
+  const slugId = fieldId("workspace-slug", disabled);
   return (
     <>
-      <Field label="Workspace name" htmlFor="ws-name">
-        <input id="ws-name" className={input()} defaultValue="Stipple Press" />
+      <Field label="Workspace name" htmlFor={nameId} error={errors["workspace.name"]}>
+        <input
+          id={nameId}
+          disabled={disabled}
+          aria-invalid={Boolean(errors["workspace.name"])}
+          aria-describedby={errors["workspace.name"] ? `${nameId}-error` : undefined}
+          value={values.workspace.name}
+          onChange={(e) =>
+            setValues((v) => ({ ...v, workspace: { ...v.workspace, name: e.target.value } }))
+          }
+          className={inputCls(Boolean(errors["workspace.name"]))}
+        />
       </Field>
-      <Field label="URL slug" htmlFor="ws-slug" hint="Used in invite links and integrations.">
-        <div className="mt-1.5 flex h-9 items-stretch overflow-hidden rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] focus-within:border-[var(--color-border-strong)]">
+      <Field
+        label="URL slug"
+        htmlFor={slugId}
+        hint={
+          values.workspace.slug
+            ? `stipple.lab/${values.workspace.slug}`
+            : "Used in invite links and integrations."
+        }
+        error={errors["workspace.slug"]}
+      >
+        <div
+          className={cn(
+            "mt-1.5 flex h-9 items-stretch overflow-hidden rounded-[var(--radius-sm)] border bg-[var(--color-bg)]",
+            slugInvalid
+              ? "border-[var(--color-accent)] focus-within:border-[var(--color-accent)]"
+              : "border-[var(--color-border)] focus-within:border-[var(--color-border-strong)]",
+          )}
+        >
           <span className="inline-flex items-center bg-[var(--color-surface-2)] px-2.5 font-mono text-[12px] text-[var(--color-text-muted)]">
             stipple.lab/
           </span>
           <input
-            id="ws-slug"
-            className="h-full flex-1 bg-transparent px-2.5 text-sm focus:outline-none"
-            defaultValue="stipple-press"
+            id={slugId}
+            disabled={disabled}
+            aria-invalid={slugInvalid}
+            aria-describedby={slugInvalid ? `${slugId}-error` : undefined}
+            value={values.workspace.slug}
+            onChange={(e) =>
+              setValues((v) => ({
+                ...v,
+                workspace: { ...v.workspace, slug: e.target.value },
+              }))
+            }
+            className="h-full flex-1 bg-transparent px-2.5 text-sm focus:outline-none disabled:opacity-70"
           />
         </div>
       </Field>
@@ -327,13 +646,31 @@ function WorkspaceStep() {
   );
 }
 
-function InviteStep() {
+function InviteStep({ values, setValues, errors, disabled }: StepProps) {
+  const emailsId = fieldId("invite-emails", disabled);
   return (
-    <Field label="Teammate emails" htmlFor="inv-emails" hint="One per line.">
+    <Field
+      label="Teammate emails"
+      htmlFor={emailsId}
+      hint="One per line."
+      error={errors["invite.emails"]}
+    >
       <textarea
-        id="inv-emails"
+        id={emailsId}
         rows={3}
-        className="mt-1.5 block w-full resize-y rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-bg)] px-2.5 py-2 font-mono text-[13px] focus:border-[var(--color-border-strong)] focus:outline-none"
+        disabled={disabled}
+        aria-invalid={Boolean(errors["invite.emails"])}
+        aria-describedby={errors["invite.emails"] ? `${emailsId}-error` : undefined}
+        value={values.invite.emails}
+        onChange={(e) =>
+          setValues((v) => ({ ...v, invite: { emails: e.target.value } }))
+        }
+        className={cn(
+          "mt-1.5 block w-full resize-y rounded-[var(--radius-sm)] border bg-[var(--color-bg)] px-2.5 py-2 font-mono text-[13px] focus:outline-none disabled:opacity-70",
+          errors["invite.emails"]
+            ? "border-[var(--color-accent)] focus:border-[var(--color-accent)]"
+            : "border-[var(--color-border)] focus:border-[var(--color-border-strong)]",
+        )}
       />
     </Field>
   );

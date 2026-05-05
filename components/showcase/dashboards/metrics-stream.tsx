@@ -1,36 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { mulberry32 } from "@/components/_kit/dot-noise";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
+import { Menu, type MenuItem } from "@/components/_kit/menu";
+import { Modal } from "@/components/_kit/modal";
 
 /**
  * Metrics stream — same KPIs as `metrics-overview`, different rhythm.
- * Four horizontal strips stacked top-to-bottom; each strip surfaces the
- * Trace sparkline as the dominant visual, with the label on the left and
- * the current value + delta on the right. Reads like a monitoring panel
- * rather than a card grid.
  *
- * Dot+line commitments specific to this plate:
- *  - The sparkline is wide enough to read the whole shape, not just the
- *    last few days. Length-as-trend is the encoding.
- *  - Each strip ends with a Federal Blue live dot at the latest point.
- *  - A faint min/max envelope (Trace `fill: "envelope"`) sits behind the
- *    line — same pattern as the medical vitals-monitor, but quieter.
- *  - Threshold rules (target / floor) appear when relevant, dashed
- *    walnut, dropping in behind the trend.
+ * Deep-wire pass (2026-05-04):
+ *  - Header → workspace switcher: Menu drives a workspace seed bag, reseeding
+ *    METRICS and replaying the in-view draw.
+ *  - Live tick: setInterval(2000) increments a tick counter; the trailing
+ *    Federal Blue dot rises 1px and falls back over 200ms ease-out
+ *    (transform only). Pause-on-hover via paused ref on the strips wrapper.
+ *  - Threshold drag: dashed target line is grabbable; drag-Y translates the
+ *    target value, snapped to 0.1 increments on release. Right cell re-
+ *    renders formatTarget.
+ *  - Click strip → fullscreen Modal with Trace at width 1100, height 320.
+ *  - Scrubber: pointer-down + drag along trace area sets scrub position;
+ *    Federal Blue hairline traces cursor; right cell shows historic value.
  *
- * Motion (interactivity pass, 2026-05-04):
- *  - LivePulse uses the calibrated `live-pulse` keyframes (0.45 → 1 → 0.45
- *    over 2000ms ease-in-out), not Tailwind's animate-pulse which dips
- *    below baseline.
- *  - On first viewport entry, each Trace's polyline draws in via
- *    stroke-dashoffset over 320ms paper-ease; the terminal Federal Blue
- *    dot fades opacity 0→1 over 120ms after the line completes.
- *    Strips stagger 30ms in order; threshold rules stay static (reference,
- *    not data). Fires once per session via IntersectionObserver.
- *
- * Client component — needs IntersectionObserver to gate the in-view draw.
+ * Client component — local state for tick / scrub / target / workspace / modal.
  */
 
 type Metric = {
@@ -41,6 +33,10 @@ type Metric = {
   series: TracePoint[];
   /** Optional horizontal target line, rendered as a dashed Trace threshold. */
   target?: number;
+  /** Format function: turns a y-value into the value display string. */
+  format: (y: number) => string;
+  /** Format function: turns a target y-value into the target display string. */
+  formatTarget: (y: number) => string;
 };
 
 function series(
@@ -60,37 +56,55 @@ function series(
   return out;
 }
 
-const METRICS: Metric[] = [
-  {
-    label: "Monthly active users",
-    value: "47.2K",
-    delta: 12.4,
-    series: series(11, 30, 38, 0.32, 1.4),
-    target: 45,
-  },
-  {
-    label: "Revenue",
-    value: "$128.4K",
-    delta: 8.1,
-    series: series(31, 30, 110, 0.6, 2.6),
-    target: 125,
-  },
-  {
-    label: "Avg. session",
-    value: "8m 42s",
-    delta: 3.2,
-    series: series(53, 30, 7.4, 0.04, 0.55),
-    target: 8,
-  },
-  {
-    label: "Churn",
-    value: "2.3%",
-    delta: -0.5,
-    goodSign: -1,
-    series: series(71, 30, 3.1, -0.025, 0.18),
-    target: 3,
-  },
-];
+type WorkspaceId = "stipple-press" | "atlas-billing" | "north-warehouse";
+
+const WORKSPACES: Record<WorkspaceId, { label: string; seedBase: number }> = {
+  "stipple-press": { label: "stipple-press", seedBase: 0 },
+  "atlas-billing": { label: "atlas-billing", seedBase: 200 },
+  "north-warehouse": { label: "north-warehouse", seedBase: 400 },
+};
+
+function buildMetrics(seedBase: number): Metric[] {
+  return [
+    {
+      label: "Monthly active users",
+      value: "47.2K",
+      delta: 12.4,
+      series: series(seedBase + 11, 30, 38, 0.32, 1.4),
+      target: 45,
+      format: (y) => `${y.toFixed(1)}K`,
+      formatTarget: (y) => `${y.toFixed(1)}K`,
+    },
+    {
+      label: "Revenue",
+      value: "$128.4K",
+      delta: 8.1,
+      series: series(seedBase + 31, 30, 110, 0.6, 2.6),
+      target: 125,
+      format: (y) => `$${y.toFixed(1)}K`,
+      formatTarget: (y) => `$${y.toFixed(1)}K`,
+    },
+    {
+      label: "Avg. session",
+      value: "8m 42s",
+      delta: 3.2,
+      series: series(seedBase + 53, 30, 7.4, 0.04, 0.55),
+      target: 8,
+      format: (y) => `${Math.floor(y)}m ${Math.round((y - Math.floor(y)) * 60)}s`,
+      formatTarget: (y) => `${y.toFixed(1)}m`,
+    },
+    {
+      label: "Churn",
+      value: "2.3%",
+      delta: -0.5,
+      goodSign: -1,
+      series: series(seedBase + 71, 30, 3.1, -0.025, 0.18),
+      target: 3,
+      format: (y) => `${y.toFixed(1)}%`,
+      formatTarget: (y) => `${y.toFixed(1)}%`,
+    },
+  ];
+}
 
 const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
 
@@ -99,10 +113,43 @@ export default function MetricsStream() {
   const [inView, setInView] = useState(false);
   const firedRef = useRef(false);
 
+  const [workspace, setWorkspace] = useState<WorkspaceId>("stipple-press");
+  const baseMetrics = useMemo(
+    () => buildMetrics(WORKSPACES[workspace].seedBase),
+    [workspace],
+  );
+
+  // Per-strip target overrides (so drag-to-set persists per metric).
+  const [targets, setTargets] = useState<Record<string, number>>({});
+  const metrics: Metric[] = baseMetrics.map((m) => ({
+    ...m,
+    target: targets[m.label] !== undefined ? targets[m.label] : m.target,
+  }));
+
+  // Live tick — every 2s, increment counter. Drives the dot's 1px rise.
+  const [tick, setTick] = useState(0);
+  const pausedRef = useRef(false);
   useEffect(() => {
-    if (firedRef.current) return;
+    const id = window.setInterval(() => {
+      if (!pausedRef.current) setTick((t) => t + 1);
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, []);
+  const refreshedAt = useMemo(() => {
+    const d = new Date();
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }, [tick]);
+
+  // Modal state for fullscreen view.
+  const [expanded, setExpanded] = useState<Metric | null>(null);
+
+  // In-view trigger for Trace draw — re-fires when workspace changes.
+  useEffect(() => {
     const node = rootRef.current;
     if (!node) return;
+    setInView(false);
     const obs = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
@@ -120,18 +167,52 @@ export default function MetricsStream() {
     return () => obs.disconnect();
   }, []);
 
+  // Workspace switch: replay the draw.
+  useEffect(() => {
+    firedRef.current = false;
+    setInView(false);
+    const id = window.setTimeout(() => {
+      firedRef.current = true;
+      setInView(true);
+    }, 60);
+    return () => window.clearTimeout(id);
+  }, [workspace]);
+
+  const workspaceMenu: MenuItem[] = (Object.keys(WORKSPACES) as WorkspaceId[]).map((id) => ({
+    label: WORKSPACES[id].label,
+    onSelect: () => setWorkspace(id),
+    glyph: id === workspace ? <span aria-hidden>·</span> : undefined,
+  }));
+
   return (
     <div
       ref={rootRef}
       className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]"
+      onMouseEnter={() => {
+        pausedRef.current = true;
+      }}
+      onMouseLeave={() => {
+        pausedRef.current = false;
+      }}
     >
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-              Stream · stipple-press
-            </div>
+            <Menu
+              trigger={
+                <button
+                  type="button"
+                  className="cursor-pointer font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                >
+                  Stream · {WORKSPACES[workspace].label}
+                  <span aria-hidden className="ml-1 inline-block">▾</span>
+                </button>
+              }
+              items={workspaceMenu}
+              placement="bottom-start"
+              ariaLabel="Switch workspace"
+            />
             <h2
               className="mt-1 font-display text-[20px] italic leading-none text-[var(--color-text)]"
               style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
@@ -141,14 +222,27 @@ export default function MetricsStream() {
           </div>
           <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
             <LivePulse />
-            live · refreshed 14:08
+            live · refreshed {refreshedAt}
           </div>
         </div>
 
-        {/* Strips — flex-1 with grow, so 4 rows fill the plate. */}
+        {/* Strips. */}
         <ul className="flex min-h-0 flex-1 flex-col divide-y divide-[var(--color-border)]">
-          {METRICS.map((m, i) => (
-            <Strip key={m.label} m={m} inView={inView} stripIndex={i} />
+          {metrics.map((m, i) => (
+            <Strip
+              key={`${workspace}-${m.label}`}
+              m={m}
+              inView={inView}
+              stripIndex={i}
+              tick={tick}
+              onTargetChange={(y) =>
+                setTargets((prev) => ({
+                  ...prev,
+                  [m.label]: Math.round(y * 10) / 10,
+                }))
+              }
+              onExpand={() => setExpanded(m)}
+            />
           ))}
         </ul>
 
@@ -159,10 +253,23 @@ export default function MetricsStream() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Each strip runs a 30-day Trace; the dashed walnut rule marks the
-          target, the Federal Blue dot marks the current reading.
+          Each strip runs a 30-day Trace; drag the dashed walnut rule to set a
+          target, drag along the trace to scrub, click to expand.
         </p>
       </div>
+
+      {/* Fullscreen modal — recomposes Trace at large size. */}
+      <Modal
+        open={expanded !== null}
+        onOpenChange={(next) => {
+          if (!next) setExpanded(null);
+        }}
+        placement="center"
+        size="lg"
+        ariaLabel={expanded ? `${expanded.label} — fullscreen` : "Metric detail"}
+      >
+        {expanded && <ExpandedMetric m={expanded} />}
+      </Modal>
     </div>
   );
 }
@@ -171,30 +278,30 @@ function Strip({
   m,
   inView,
   stripIndex,
+  tick,
+  onTargetChange,
+  onExpand,
 }: {
   m: Metric;
   inView: boolean;
   stripIndex: number;
+  tick: number;
+  onTargetChange: (y: number) => void;
+  onExpand: () => void;
 }) {
   const yMin = Math.min(...m.series.map((p) => p.y), m.target ?? Infinity);
   const yMax = Math.max(...m.series.map((p) => p.y), m.target ?? -Infinity);
   const pad = (yMax - yMin) * 0.18 || 1;
+  const yDomain: [number, number] = [yMin - pad, yMax + pad];
 
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  // Stagger 30ms across strips, then trigger the dashoffset → 0 transition.
-  // After the 320ms draw, fade the terminal dot from opacity 0 → 1 over
-  // 120ms. The dot is the only <circle> Trace renders for this strip;
-  // we hide it from the start by setting opacity:0 inline, then transition
-  // it in once the line finishes drawing.
+  // First-time stroke-dashoffset draw on viewport entry.
   useEffect(() => {
     if (!inView) return;
     const node = wrapRef.current;
     if (!node) return;
 
-    // Trace renders threshold rules (<line>), the trend (<path fill="none">),
-    // and dot marks (<circle>). We grab the path for the dashoffset draw and
-    // any circles for the post-draw fade-in.
     const path = node.querySelector<SVGPathElement>("path[fill='none']");
     const circles = Array.from(node.querySelectorAll<SVGCircleElement>("circle"));
     if (!path) return;
@@ -207,14 +314,11 @@ function Strip({
       }
     })();
 
-    // Hide the terminal dot up front; fade it in after the line completes.
     for (const c of circles) {
       c.style.opacity = "0";
     }
 
     if (len <= 0) {
-      // Nothing to animate — fade the dot in immediately so we never end in
-      // a hidden state.
       for (const c of circles) {
         c.style.transition = "opacity 120ms ease-out";
         c.style.opacity = "1";
@@ -225,7 +329,6 @@ function Strip({
     path.style.transition = "none";
     path.style.strokeDasharray = `${len}`;
     path.style.strokeDashoffset = `${len}`;
-    // Force a reflow so the next style change kicks the transition.
     void path.getBoundingClientRect();
 
     const startDelay = stripIndex * 30;
@@ -246,6 +349,118 @@ function Strip({
     };
   }, [inView, stripIndex]);
 
+  // Live tick — bump terminal dot 1px up then back over 200ms ease-out.
+  useEffect(() => {
+    if (!inView) return;
+    const node = wrapRef.current;
+    if (!node) return;
+    const dot = node.querySelector<SVGCircleElement>("circle");
+    if (!dot) return;
+    dot.style.transition = "transform 100ms ease-out";
+    dot.style.transform = "translateY(-1px)";
+    const t = window.setTimeout(() => {
+      dot.style.transition = "transform 100ms ease-in";
+      dot.style.transform = "translateY(0)";
+    }, 100);
+    return () => window.clearTimeout(t);
+  }, [tick, inView]);
+
+  // Scrubber state — drag-along-trace.
+  const [scrubDay, setScrubDay] = useState<number | null>(null);
+  // Drag-target-line state — translate the dashed threshold.
+  const [draggingTarget, setDraggingTarget] = useState(false);
+  const [tempTarget, setTempTarget] = useState<number | null>(null);
+
+  // Trace SVG geometry, used for both scrub and target-drag math.
+  const TRACE_W = 520;
+  const TRACE_H = 76;
+  const margin = 1;
+  const innerW = TRACE_W - margin * 2;
+  const innerH = TRACE_H - margin * 2;
+
+  // Convert clientY → data-space y given the SVG element's screen CTM.
+  const yFromClientY = (svg: SVGSVGElement, clientY: number): number => {
+    const pt = svg.createSVGPoint();
+    pt.x = 0;
+    pt.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return yDomain[0];
+    const local = pt.matrixTransform(ctm.inverse());
+    const yLocal = local.y;
+    const t = (yLocal - margin) / innerH;
+    // Y inverts (SVG +y goes down).
+    return yDomain[1] - t * (yDomain[1] - yDomain[0]);
+  };
+  const xToDay = (svg: SVGSVGElement, clientX: number): number => {
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = 0;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return 0;
+    const local = pt.matrixTransform(ctm.inverse());
+    const xLocal = local.x;
+    const t = (xLocal - margin) / innerW;
+    return Math.max(0, Math.min(m.series.length - 1, Math.round(t * (m.series.length - 1))));
+  };
+
+  // Pointer handlers on the trace cell.
+  const traceCellRef = useRef<HTMLDivElement | null>(null);
+  const onTracePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const svg = traceCellRef.current?.querySelector("svg");
+    if (!svg) return;
+    // Decide: clicking close to the threshold line starts target-drag;
+    // anywhere else starts scrub.
+    const yData = yFromClientY(svg as SVGSVGElement, e.clientY);
+    const target = m.target ?? yDomain[0];
+    const yPxPerData = innerH / (yDomain[1] - yDomain[0]);
+    const distPx = Math.abs(yData - target) * yPxPerData;
+    if (distPx < 6 && m.target !== undefined) {
+      setDraggingTarget(true);
+      setTempTarget(target);
+    } else {
+      const day = xToDay(svg as SVGSVGElement, e.clientX);
+      setScrubDay(day);
+    }
+    (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId);
+  };
+  const onTracePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const svg = traceCellRef.current?.querySelector("svg");
+    if (!svg) return;
+    if (draggingTarget) {
+      const y = yFromClientY(svg as SVGSVGElement, e.clientY);
+      // clamp to domain.
+      const clamped = Math.max(yDomain[0], Math.min(yDomain[1], y));
+      setTempTarget(clamped);
+    } else if (scrubDay != null) {
+      const day = xToDay(svg as SVGSVGElement, e.clientX);
+      setScrubDay(day);
+    }
+  };
+  const onTracePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (draggingTarget) {
+      if (tempTarget != null) onTargetChange(tempTarget);
+      setDraggingTarget(false);
+      setTempTarget(null);
+    }
+    setScrubDay(null);
+    try {
+      (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId);
+    } catch {
+      /* swallow */
+    }
+  };
+
+  const displayedTarget =
+    draggingTarget && tempTarget != null ? tempTarget : m.target;
+  const scrubValue = scrubDay != null ? m.series[scrubDay].y : null;
+  const valueText = scrubValue != null ? m.format(scrubValue) : m.value;
+
+  // Scrub-line geometry (data → SVG x).
+  const scrubX = scrubDay != null
+    ? margin + (scrubDay / (m.series.length - 1)) * innerW
+    : null;
+
   return (
     <li className="grid flex-1 grid-cols-[180px_1fr_140px] items-center gap-4 px-6 py-4">
       {/* Label + target */}
@@ -253,34 +468,140 @@ function Strip({
         <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text)]">
           {m.label}
         </div>
-        {m.target !== undefined && (
+        {displayedTarget !== undefined && (
           <div className="mt-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
             target ·{" "}
-            <span className="text-[var(--color-text)]">{formatTarget(m)}</span>
+            <span className="text-[var(--color-text)]">{m.formatTarget(displayedTarget)}</span>
           </div>
         )}
       </div>
 
-      {/* Trace — fills its cell, height bumped to 76 so it fills taller strips.
-          Wrapped in a ref'd div so we can find the underlying <path> and
-          run the stroke-dashoffset draw on first viewport entry. The
-          terminal dot is rendered as a sibling SVG overlay so we can fade
-          it in independently after the line completes (Trace's built-in
-          `dots` would render at full opacity from the start). */}
-      <div ref={wrapRef} className="relative min-w-0">
+      {/* Trace cell — wraps Trace, scrub overlay, target-drag pill. */}
+      <div
+        ref={traceCellRef}
+        className="relative min-w-0"
+        onPointerDown={onTracePointerDown}
+        onPointerMove={onTracePointerMove}
+        onPointerUp={onTracePointerUp}
+        onClick={(e) => {
+          // Treat a quick click as expand. We treat true drags as not-expand
+          // by checking whether the user actually scrubbed/dragged.
+          if (scrubDay == null && !draggingTarget) onExpand();
+        }}
+        style={{ touchAction: "none", cursor: "crosshair" }}
+      >
+        <div ref={wrapRef}>
+          <Trace
+            data={m.series}
+            width={TRACE_W}
+            height={TRACE_H}
+            yDomain={yDomain}
+            smooth
+            strokeColor="var(--color-text)"
+            strokeWidth={1.1}
+            fill={{
+              kind: "envelope",
+              lower: yMin,
+              upper: yMax,
+              color: "color-mix(in oklch, var(--color-text-muted) 5%, transparent)",
+            }}
+            thresholds={
+              displayedTarget !== undefined
+                ? [{ y: displayedTarget, dashed: true, color: "var(--color-border-strong)" }]
+                : undefined
+            }
+            dots={[
+              {
+                index: m.series.length - 1,
+                color: "var(--color-accent-2)",
+                radius: 2.3,
+              },
+            ]}
+            className="block w-full"
+            ariaLabel={`${m.label} trend`}
+          />
+        </div>
+
+        {/* Scrub line overlay — opacity transition only; positioned via CSS
+            left percentage so it follows the pointer without re-rendering
+            SVG geometry. */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0"
+          style={{
+            left: scrubX != null ? `${(scrubX / TRACE_W) * 100}%` : 0,
+            width: 1,
+            background: "var(--color-accent-2)",
+            opacity: scrubX != null ? 0.85 : 0,
+            transition: "opacity 120ms ease-out",
+          }}
+        />
+
+        {/* Target-drag pill — appears mid-drag, fades out on release. */}
+        {draggingTarget && tempTarget != null && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -translate-y-1/2 rounded-[var(--radius-xs)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text)]"
+            style={{
+              right: 8,
+              top: `${
+                margin +
+                (1 - (tempTarget - yDomain[0]) / (yDomain[1] - yDomain[0])) * innerH
+              }px`,
+              transition: "opacity 120ms ease-out",
+            }}
+          >
+            target · {m.formatTarget(tempTarget)}
+          </div>
+        )}
+      </div>
+
+      {/* Value + delta */}
+      <div className="flex flex-col items-end">
+        <span
+          className="font-display text-[26px] leading-none italic tracking-[-0.02em] text-[var(--color-text)]"
+          style={{
+            fontVariationSettings: '"opsz" 36, "SOFT" 30',
+            color: scrubValue != null ? "var(--color-accent-2)" : undefined,
+          }}
+        >
+          {valueText}
+        </span>
+        <Delta value={m.delta} goodSign={m.goodSign ?? 1} />
+      </div>
+    </li>
+  );
+}
+
+function ExpandedMetric({ m }: { m: Metric }) {
+  const yMin = Math.min(...m.series.map((p) => p.y), m.target ?? Infinity);
+  const yMax = Math.max(...m.series.map((p) => p.y), m.target ?? -Infinity);
+  const pad = (yMax - yMin) * 0.18 || 1;
+  return (
+    <div className="px-6 py-6">
+      <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+        {m.label}
+      </div>
+      <div
+        className="mt-1 font-display text-[36px] italic leading-none text-[var(--color-text)]"
+        style={{ fontVariationSettings: '"opsz" 48, "SOFT" 30' }}
+      >
+        {m.value}
+      </div>
+      <div className="mt-3">
         <Trace
           data={m.series}
-          width={520}
-          height={76}
+          width={1100}
+          height={320}
           yDomain={[yMin - pad, yMax + pad]}
           smooth
           strokeColor="var(--color-text)"
-          strokeWidth={1.1}
+          strokeWidth={1.4}
           fill={{
             kind: "envelope",
             lower: yMin,
             upper: yMax,
-            color: "color-mix(in oklch, var(--color-text-muted) 5%, transparent)",
+            color: "color-mix(in oklch, var(--color-text-muted) 7%, transparent)",
           }}
           thresholds={
             m.target !== undefined
@@ -291,40 +612,37 @@ function Strip({
             {
               index: m.series.length - 1,
               color: "var(--color-accent-2)",
-              radius: 2.3,
+              radius: 3,
             },
           ]}
           className="block w-full"
-          ariaLabel={`${m.label} trend`}
+          ariaLabel={`${m.label} expanded trend`}
         />
+        <div className="mt-2 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+          <span>day 1</span>
+          <span>day 30</span>
+        </div>
       </div>
-
-      {/* Value + delta */}
-      <div className="flex flex-col items-end">
-        <span
-          className="font-display text-[26px] leading-none italic tracking-[-0.02em] text-[var(--color-text)]"
-          style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
-        >
-          {m.value}
-        </span>
-        <Delta value={m.delta} goodSign={m.goodSign ?? 1} />
-      </div>
-    </li>
+      <ul className="mt-6 grid grid-cols-3 gap-3 text-xs text-[var(--color-text-muted)]">
+        <li>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em]">Min</div>
+          <div className="mt-0.5 text-[var(--color-text)]">{m.format(yMin)}</div>
+        </li>
+        <li>
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em]">Max</div>
+          <div className="mt-0.5 text-[var(--color-text)]">{m.format(yMax)}</div>
+        </li>
+        {m.target !== undefined && (
+          <li>
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em]">Target</div>
+            <div className="mt-0.5 text-[var(--color-text)]">{m.formatTarget(m.target)}</div>
+          </li>
+        )}
+      </ul>
+    </div>
   );
 }
 
-/** Display-format the target as a parallel string to the value. */
-function formatTarget(m: Metric): string {
-  if (m.label === "Monthly active users") return `${m.target}K`;
-  if (m.label === "Revenue") return `$${m.target}K`;
-  if (m.label === "Avg. session") return `${m.target}m`;
-  if (m.label === "Churn") return `${m.target}%`;
-  return String(m.target);
-}
-
-/** Tiny pulsing live dot — uses the calibrated `live-pulse` keyframes
- *  (0.45 → 1 → 0.45, 2000ms ease-in-out) defined in globals.css. Tailwind's
- *  `animate-pulse` is the wrong envelope for this — it dips below baseline. */
 function LivePulse() {
   return (
     <span

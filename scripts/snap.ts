@@ -47,6 +47,17 @@ async function snap(
     await page.emulateMedia({ colorScheme: theme });
     const url = `${BASE}/preview/${category}/${slug}`;
     await page.goto(url, { waitUntil: "networkidle", timeout: 30_000 });
+    // Suppress Next.js dev-mode indicators that bake into the captured frame.
+    // The `nextjs-portal` custom element hosts the dev tools / build-status
+    // indicator; without this, the cream pill ends up overlapping plate UI.
+    await page.addStyleTag({
+      content: `
+        nextjs-portal,
+        [data-next-mark],
+        [data-nextjs-toast],
+        [data-nextjs-dialog-overlay] { display: none !important; }
+      `,
+    });
     // Wait for fonts so Fraunces / Geist render at their final widths.
     await page.evaluate(() => document.fonts.ready);
     // Two animation frames so dot-fields settle before capture.

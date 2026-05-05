@@ -1,62 +1,35 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { mulberry32 } from "@/components/_kit/dot-noise";
 import { Trace, type TracePoint } from "@/components/_kit/trace";
+import { Modal } from "@/components/_kit/modal";
+import { useToast } from "@/components/_kit/toast";
 
 /**
- * REGISTRY:
- * {
- *   domain: "saas",
- *   category: "dashboards",
- *   slug: "deploy-pipeline",
- *   title: "Deploy pipeline",
- *   filename: "deploy-pipeline.tsx",
- *   description: "Three environment lanes — preview / staging / production. Each deploy is a dot on a time axis; rollout duration trails behind. Failed deploys ink persimmon, the live deploy wears a Federal Blue ring with the pulse.",
- *   layout: "specimen",
- *   aspectRatio: "16 / 9",
- *   maxWidth: 880,
- *   firstImpression: "2026-05-04",
- * }
- */
-
-/**
- * Deploy pipeline — three horizontal env lanes (preview / staging / production)
- * read top-to-bottom by promotion order. Each deploy is a dot on its lane at
- * commit time; a hairline trail behind the dot encodes rollout duration. A
- * sparse Trace under each lane carries deploy frequency (24-hour rolling).
+ * Deploy pipeline — three env lanes (preview / staging / production).
  *
- * Encoding:
- *   - x = commit time (24h window, right edge = now)
- *   - y = environment lane
- *   - dot fill: walnut = succeeded, persimmon = failed, hollow = rolled back
- *   - dot ring: Federal Blue + pulse = in-flight (production lane only here)
- *   - trailing hairline length = rollout duration (longer trail = slower deploy)
- *   - sparse Trace under each lane = deploy frequency over the window
- *
- * Motion (interactivity pass, 2026-05-04):
- *   - Live ring uses calibrated `live-pulse` keyframes from globals.css
- *     (0.45 → 1 → 0.45 over 2000ms ease-in-out), not Tailwind's animate-pulse.
- *   - Native <title> tooltips replaced with the activity-heatmap in-SVG
- *     tooltip pattern: hover state lifted to a single useState across all
- *     three lanes, custom <g> rendered last in the SVG, mono-caps eyebrow
- *     + Fraunces italic content. 0ms in, 120ms ease-out out (opacity-toggle
- *     so position doesn't jump on exit).
- *
- * Client component — needs hover state for the cross-lane custom tooltip.
+ * Deep-wire pass (2026-05-04):
+ *  - Click a deploy → side detail Modal with SHA, branch, status, rollout
+ *    duration, commit message, author, Promote/Rollback actions.
+ *  - Legend filters: each chip toggles a status; hidden statuses dim to
+ *    fillOpacity 0.15 / trail-opacity 0.1 (200ms transition, never r/cx/cy).
+ *  - Promote ghost arc: animates a translate from staging to production
+ *    over 320ms paper-ease, then fires a toast and appends a live deploy.
+ *  - Time-window toggle: 24h / 7d / 30d regenerates lanes with different
+ *    seeds + counts. SVG group fades 200ms during transition.
+ *  - Right-gutter focus mode: clicking a lane's count collapses other
+ *    lanes to opacity 0.4 / shrink (200ms grid-row transition).
  */
 
 type DeployStatus = "ok" | "fail" | "rolled-back" | "live";
 
 type Deploy = {
-  /** Commit time as a 0..1 position across the 24h window. */
   t: number;
   status: DeployStatus;
-  /** Rollout duration as a 0..1 fraction of the lane width. */
   rollout: number;
   sha: string;
   branch: string;
-  /** Rollout duration in seconds — used by the tooltip prose. */
   rolloutSeconds: number;
 };
 
@@ -65,8 +38,15 @@ type Lane = {
   label: string;
   branchRef: string;
   deploys: Deploy[];
-  /** 24-bin rolling deploy count for the sparse Trace beneath the lane. */
   frequency: TracePoint[];
+};
+
+type WindowId = "24h" | "7d" | "30d";
+
+const WINDOW_LABEL: Record<WindowId, string> = {
+  "24h": "last 24 hours",
+  "7d": "last 7 days",
+  "30d": "last 30 days",
 };
 
 function shaFromSeed(seed: number): string {
@@ -86,8 +66,9 @@ function buildLane(args: {
   failureRate: number;
   rolloutBase: number;
   liveAt?: number;
+  rolloutScale: number; // multiplier for rolloutSeconds across the window
 }): Lane {
-  const { env, label, branchRef, seed, count, failureRate, rolloutBase, liveAt } = args;
+  const { env, label, branchRef, seed, count, failureRate, rolloutBase, liveAt, rolloutScale } = args;
   const rng = mulberry32(seed);
   const ts: number[] = [];
   for (let i = 0; i < count; i++) ts.push(rng());
@@ -98,13 +79,10 @@ function buildLane(args: {
     if (r < failureRate) status = "fail";
     else if (r < failureRate + 0.06) status = "rolled-back";
     const rollout = rolloutBase + rng() * 0.04;
-    // 24h × 3600s = 86400s; rollout fraction × window seconds.
-    const rolloutSeconds = Math.round(rollout * 86400);
+    const rolloutSeconds = Math.round(rollout * rolloutScale);
     return {
       t,
       status,
-      // Bumped 2.5x from earlier hairline values so trails read as a
-      // duration encoding rather than melting into adjacent dots.
       rollout,
       rolloutSeconds,
       sha: shaFromSeed(seed + i + 1),
@@ -123,13 +101,11 @@ function buildLane(args: {
       status: "live",
     };
   }
-  // 24 bins of frequency.
   const bins = new Array(24).fill(0);
   for (const d of deploys) {
     const bin = Math.min(23, Math.floor(d.t * 24));
     bins[bin] += 1;
   }
-  // Smooth a touch by rolling 3-bin average so the Trace reads as a curve.
   const smoothed: TracePoint[] = bins.map((_, i) => {
     const a = bins[Math.max(0, i - 1)];
     const b = bins[i];
@@ -139,36 +115,48 @@ function buildLane(args: {
   return { env, label, branchRef, deploys, frequency: smoothed };
 }
 
-const LANES: Lane[] = [
-  buildLane({
-    env: "preview",
-    label: "Preview",
-    branchRef: "pr/*",
-    seed: 17,
-    count: 22,
-    failureRate: 0.18,
-    rolloutBase: 0.03,
-  }),
-  buildLane({
-    env: "staging",
-    label: "Staging",
-    branchRef: "release/2026.5.x",
-    seed: 41,
-    count: 14,
-    failureRate: 0.1,
-    rolloutBase: 0.055,
-  }),
-  buildLane({
-    env: "production",
-    label: "Production",
-    branchRef: "main",
-    seed: 73,
-    count: 9,
-    failureRate: 0.06,
-    rolloutBase: 0.085,
-    liveAt: 0.94,
-  }),
-];
+function buildLanes(window: WindowId): Lane[] {
+  // Different counts/failure rates/rollout scales per window.
+  const cfg: Record<WindowId, { mult: number; rolloutScale: number; seedOffset: number }> = {
+    "24h": { mult: 1, rolloutScale: 86400, seedOffset: 0 },
+    "7d": { mult: 3, rolloutScale: 86400 * 7, seedOffset: 100 },
+    "30d": { mult: 6, rolloutScale: 86400 * 30, seedOffset: 250 },
+  };
+  const c = cfg[window];
+  return [
+    buildLane({
+      env: "preview",
+      label: "Preview",
+      branchRef: "pr/*",
+      seed: 17 + c.seedOffset,
+      count: Math.round(22 * c.mult),
+      failureRate: 0.18,
+      rolloutBase: 0.03,
+      rolloutScale: c.rolloutScale,
+    }),
+    buildLane({
+      env: "staging",
+      label: "Staging",
+      branchRef: "release/2026.5.x",
+      seed: 41 + c.seedOffset,
+      count: Math.round(14 * c.mult),
+      failureRate: 0.1,
+      rolloutBase: 0.055,
+      rolloutScale: c.rolloutScale,
+    }),
+    buildLane({
+      env: "production",
+      label: "Production",
+      branchRef: "main",
+      seed: 73 + c.seedOffset,
+      count: Math.round(9 * c.mult),
+      failureRate: 0.06,
+      rolloutBase: 0.085,
+      liveAt: 0.94,
+      rolloutScale: c.rolloutScale,
+    }),
+  ];
+}
 
 const STATUS_INK: Record<DeployStatus, string> = {
   ok: "var(--color-text)",
@@ -192,13 +180,114 @@ function formatRollout(seconds: number): string {
   return `rolled out in ${m}m ${s}s`;
 }
 
+function commitMessageFor(d: Deploy): string {
+  // Deterministic stub from sha digits.
+  const seeds = d.sha.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const msgs = [
+    "Tighten retry envelope on edge fetch",
+    "Roll dead-letter queue out to staging",
+    "Patch race in workspace switcher",
+    "Bump pinned shiki to align dual-theme tokens",
+    "Speed up onboarding plate first-paint",
+    "Drop legacy density encoding in heatmap",
+    "Wire toast viewport to portal in app shell",
+  ];
+  return msgs[seeds % msgs.length];
+}
+
+function authorFor(d: Deploy): { initials: string; name: string } {
+  const seeds = d.sha.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const opts = [
+    { initials: "MR", name: "Mara Reyes" },
+    { initials: "JT", name: "Jules Tanaka" },
+    { initials: "AH", name: "Amir Haddad" },
+    { initials: "RG", name: "Rosa Garcia" },
+  ];
+  return opts[seeds % opts.length];
+}
+
+const ALL_STATUSES: DeployStatus[] = ["ok", "fail", "rolled-back", "live"];
+
 export default function DeployPipeline() {
-  // Single hover state across all three lanes. Holds the LAST hovered
-  // deploy through the exit transition so position doesn't jump.
-  const [hovered, setHovered] = useState<{
-    deploy: Deploy;
-    lane: Lane;
+  const [hovered, setHovered] = useState<{ deploy: Deploy; lane: Lane } | null>(null);
+  const [selected, setSelected] = useState<{ deploy: Deploy; lane: Lane } | null>(null);
+  const [visible, setVisible] = useState<Set<DeployStatus>>(new Set(ALL_STATUSES));
+  const [windowId, setWindowId] = useState<WindowId>("24h");
+  const [focusEnv, setFocusEnv] = useState<Lane["env"] | null>(null);
+  const [swapping, setSwapping] = useState(false);
+
+  // Promote-arc ghost dot.
+  const [promoteArc, setPromoteArc] = useState<{
+    fromX: number;
+    yStart: number;
+    yEnd: number;
+    sha: string;
   } | null>(null);
+
+  const baseLanes = useMemo(() => buildLanes(windowId), [windowId]);
+  // We append "promoted" deploys to production at runtime.
+  const [extraProdDeploys, setExtraProdDeploys] = useState<Deploy[]>([]);
+  const lanes: Lane[] = useMemo(() => {
+    return baseLanes.map((l) => {
+      if (l.env !== "production" || extraProdDeploys.length === 0) return l;
+      // Replace any prior live status with ok, append the new live.
+      const next = l.deploys.map((d) => (d.status === "live" ? { ...d, status: "ok" as DeployStatus } : d));
+      return { ...l, deploys: [...next, ...extraProdDeploys] };
+    });
+  }, [baseLanes, extraProdDeploys]);
+
+  // Window-swap fade.
+  const swapKey = windowId;
+  const lastSwapRef = useRef(swapKey);
+  if (lastSwapRef.current !== swapKey) {
+    lastSwapRef.current = swapKey;
+  }
+  const handleSetWindow = (w: WindowId) => {
+    if (w === windowId) return;
+    setSwapping(true);
+    window.setTimeout(() => setSwapping(false), 200);
+    setWindowId(w);
+    setExtraProdDeploys([]);
+  };
+
+  const { toast } = useToast();
+
+  const onPromote = (deploy: Deploy, lane: Lane) => {
+    if (lane.env !== "staging") return;
+    // Compute SVG positions in the lane geometry.
+    const W = 720;
+    const padX = 8;
+    const innerW = W - padX * 2;
+    const cx = padX + deploy.t * innerW;
+    // yStart = staging center, yEnd = production center. Strip rows are 36px
+    // tall in user-space; we approximate jump distance in the same coordinate
+    // system as a fraction of the lane height. In practice the ghost element
+    // lives in DOM (absolute-positioned) so we measure the production lane's
+    // top relative to the staging lane.
+    setPromoteArc({ fromX: cx, yStart: 0, yEnd: 1, sha: deploy.sha });
+    // Toast loading.
+    const id = toast({ title: `Promoting ${deploy.sha} → production…`, status: "loading" });
+    window.setTimeout(() => {
+      setPromoteArc(null);
+      // Append a live deploy to production at t≈0.95.
+      const newLive: Deploy = {
+        t: 0.95,
+        status: "live",
+        rollout: 0.06,
+        rolloutSeconds: 360,
+        sha: deploy.sha,
+        branch: "main",
+      };
+      setExtraProdDeploys((prev) => [...prev, newLive]);
+      toast({ id, title: `Promoted ${deploy.sha} → production`, status: "success" });
+    }, 320);
+    setSelected(null);
+  };
+
+  const onRollback = (deploy: Deploy) => {
+    toast({ title: `Rolled back ${deploy.sha}`, status: "info" });
+    setSelected(null);
+  };
 
   return (
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -207,7 +296,7 @@ export default function DeployPipeline() {
         <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] px-6 py-3">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-              Pipeline · last 24 hours
+              Pipeline · {WINDOW_LABEL[windowId]}
             </div>
             <h2
               className="mt-1 font-display text-[28px] italic leading-none tracking-[-0.02em] text-[var(--color-text)]"
@@ -216,40 +305,50 @@ export default function DeployPipeline() {
               stipple-press / deploys
             </h2>
           </div>
-          {/* Federal Blue pulse retired here — page is live by definition.
-              Pulse is reserved for the in-flight production data dot. */}
-          <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
-            <span
-              className="inline-flex items-center rounded-[var(--radius-xs)] border border-[var(--color-border)] px-1.5 py-px font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]"
-            >
-              live
-            </span>
-            14:08 UTC
-          </div>
+          <WindowToggle value={windowId} onChange={handleSetWindow} />
         </div>
 
-        {/* Legend strip — single source of truth for the dot vocabulary. */}
-        <StatusLegend />
+        {/* Filterable legend strip. */}
+        <FilterableLegend visible={visible} setVisible={setVisible} />
 
         {/* Three env lanes. */}
-        <ul className="flex min-h-0 flex-1 flex-col divide-y divide-[var(--color-border)]">
-          {LANES.map((lane) => (
+        <ul
+          className="grid min-h-0 flex-1 divide-y divide-[var(--color-border)] transition-[opacity] duration-[200ms]"
+          style={{
+            opacity: swapping ? 0 : 1,
+            gridTemplateRows: lanes
+              .map((l) =>
+                focusEnv === null
+                  ? "1fr"
+                  : focusEnv === l.env
+                    ? "3fr"
+                    : "0.4fr",
+              )
+              .join(" "),
+            transitionProperty: "opacity, grid-template-rows",
+            transitionDuration: "200ms",
+          }}
+        >
+          {lanes.map((lane) => (
             <LaneRow
               key={lane.env}
               lane={lane}
               hovered={hovered}
               setHovered={setHovered}
+              setSelected={setSelected}
+              visible={visible}
+              focused={focusEnv === lane.env}
+              dimmed={focusEnv !== null && focusEnv !== lane.env}
+              onToggleFocus={() =>
+                setFocusEnv((prev) => (prev === lane.env ? null : lane.env))
+              }
+              promoteArc={lane.env === "production" ? promoteArc : null}
             />
           ))}
         </ul>
 
-        {/* Shared time axis — one row of tick labels for all three lanes,
-            so 24h orientation reads once rather than three times. */}
-        <TimeAxis />
+        <TimeAxis windowId={windowId} />
 
-        {/* Foot rule — window descriptor only. Branch refs already appear in
-            each lane's left column, so the colophon carries unique info
-            (window range + freshness) rather than echoing them. */}
         <p
           className="border-t border-[var(--color-border)] px-6 py-2 text-center text-[11px] italic text-[var(--color-text-muted)]"
           style={{
@@ -258,14 +357,144 @@ export default function DeployPipeline() {
           }}
         >
           <span className="not-italic font-mono text-[10px] uppercase tracking-[0.14em]">
-            00:00 → 14:08 UTC
-          </span>
-          <span className="not-italic"> · </span>
-          <span className="not-italic font-mono text-[10px] uppercase tracking-[0.14em]">
-            refreshed 12s ago
+            click a deploy to inspect · legend filters · count to focus a lane
           </span>
         </p>
       </div>
+
+      {/* Side detail Modal */}
+      <Modal
+        open={selected !== null}
+        onOpenChange={(next) => {
+          if (!next) setSelected(null);
+        }}
+        placement="right"
+        size="md"
+        ariaLabel={selected ? `Deploy ${selected.deploy.sha}` : "Deploy detail"}
+      >
+        {selected && (
+          <DeployDetailPanel
+            selected={selected}
+            onPromote={() => onPromote(selected.deploy, selected.lane)}
+            onRollback={() => onRollback(selected.deploy)}
+            onClose={() => setSelected(null)}
+          />
+        )}
+      </Modal>
+    </div>
+  );
+}
+
+function WindowToggle({
+  value,
+  onChange,
+}: {
+  value: WindowId;
+  onChange: (v: WindowId) => void;
+}) {
+  const opts: WindowId[] = ["24h", "7d", "30d"];
+  return (
+    <div
+      role="tablist"
+      aria-label="Window"
+      className="inline-flex items-center gap-px rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] p-0.5"
+    >
+      {opts.map((o) => {
+        const active = o === value;
+        return (
+          <button
+            key={o}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(o)}
+            className={
+              active
+                ? "h-6 rounded-[var(--radius-xs)] bg-[var(--color-bg)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text)] shadow-[inset_0_0_0_1px_var(--color-border)]"
+                : "h-6 rounded-[var(--radius-xs)] px-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            }
+          >
+            {o}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function FilterableLegend({
+  visible,
+  setVisible,
+}: {
+  visible: Set<DeployStatus>;
+  setVisible: (s: Set<DeployStatus>) => void;
+}) {
+  const items: Array<{ status: DeployStatus; label: string }> = [
+    { status: "ok", label: "succeeded" },
+    { status: "fail", label: "failed" },
+    { status: "rolled-back", label: "rolled back" },
+    { status: "live", label: "in-flight" },
+  ];
+  const toggle = (s: DeployStatus) => {
+    const next = new Set(visible);
+    if (next.has(s)) next.delete(s);
+    else next.add(s);
+    setVisible(next);
+  };
+  return (
+    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-[var(--color-border)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+      <span aria-hidden>Deploy key</span>
+      {items.map((it) => {
+        const on = visible.has(it.status);
+        return (
+          <button
+            key={it.status}
+            type="button"
+            onClick={() => toggle(it.status)}
+            aria-pressed={on}
+            className={
+              "inline-flex items-center gap-1.5 whitespace-nowrap rounded-[var(--radius-xs)] px-1 py-0.5 transition-[opacity,background-color] duration-[120ms] ease-out " +
+              (on
+                ? "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)]"
+                : "opacity-40 hover:opacity-70")
+            }
+          >
+            {it.status === "rolled-back" ? (
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 rounded-full border"
+                style={{ borderColor: "var(--color-text-muted)" }}
+              />
+            ) : it.status === "live" ? (
+              <span
+                aria-hidden
+                className="grid h-2 w-2 place-items-center rounded-full"
+                style={{ boxShadow: "inset 0 0 0 1px var(--color-accent-2)" }}
+              >
+                <span
+                  className="h-1 w-1 rounded-full"
+                  style={{ background: "var(--color-accent-2)" }}
+                />
+              </span>
+            ) : (
+              <span
+                aria-hidden
+                className="h-1 w-1 rounded-full"
+                style={{ background: STATUS_INK[it.status] }}
+              />
+            )}
+            <span>{it.label}</span>
+          </button>
+        );
+      })}
+      <span className="ml-auto inline-flex items-center gap-1.5">
+        <span
+          aria-hidden
+          className="h-px w-4"
+          style={{ background: "var(--color-text-muted)", opacity: 0.55 }}
+        />
+        <span>trail = rollout duration</span>
+      </span>
     </div>
   );
 }
@@ -274,29 +503,41 @@ function LaneRow({
   lane,
   hovered,
   setHovered,
+  setSelected,
+  visible,
+  focused,
+  dimmed,
+  onToggleFocus,
+  promoteArc,
 }: {
   lane: Lane;
   hovered: { deploy: Deploy; lane: Lane } | null;
   setHovered: (h: { deploy: Deploy; lane: Lane } | null) => void;
+  setSelected: (s: { deploy: Deploy; lane: Lane } | null) => void;
+  visible: Set<DeployStatus>;
+  focused: boolean;
+  dimmed: boolean;
+  onToggleFocus: () => void;
+  promoteArc: { fromX: number; yStart: number; yEnd: number; sha: string } | null;
 }) {
-  // Lane geometry — all in user units; SVG scales via the parent.
   const W = 720;
   const H = 36;
   const padX = 8;
   const innerW = W - padX * 2;
   const yDot = 18;
 
-  // Hold the last-hovered deploy from THIS lane so the exit transition
-  // animates from its real position rather than snapping. We keep a ref
-  // so it survives across renders without re-triggering effects.
   const lastRef = useRef<Deploy | null>(null);
   const isLaneHover = hovered && hovered.lane.env === lane.env;
   if (isLaneHover) lastRef.current = hovered.deploy;
   const tooltipDeploy = isLaneHover ? hovered.deploy : lastRef.current;
 
   return (
-    <li className="grid flex-1 grid-cols-[132px_1fr_120px] items-center gap-4 px-6 py-3">
-      {/* Env label */}
+    <li
+      className="grid grid-cols-[132px_1fr_120px] items-center gap-4 px-6 py-3 transition-[opacity] duration-[200ms]"
+      style={{
+        opacity: dimmed ? 0.4 : 1,
+      }}
+    >
       <div className="leading-tight">
         <div className="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text)]">
           {lane.label}
@@ -306,17 +547,16 @@ function LaneRow({
         </div>
       </div>
 
-      {/* Lane body — dots + trails on top, sparse Trace underneath as a sibling SVG */}
-      <div className="min-w-0">
+      <div className="relative min-w-0">
         <svg
           viewBox={`0 0 ${W} ${H}`}
           width="100%"
           height={H}
           className="block"
-          aria-label={`${lane.label} deploys, last 24 hours`}
+          aria-label={`${lane.label} deploys`}
           shapeRendering="geometricPrecision"
         >
-          {/* Lane base rule — hairline ground line for the dots to sit on. */}
+          {/* Lane base rule */}
           <line
             x1={padX}
             x2={W - padX}
@@ -325,8 +565,6 @@ function LaneRow({
             stroke="var(--color-border)"
             strokeWidth={0.6}
           />
-
-          {/* Tick marks every 6h for time legibility. */}
           {[0, 0.25, 0.5, 0.75, 1].map((t) => (
             <line
               key={t}
@@ -340,14 +578,12 @@ function LaneRow({
             />
           ))}
 
-          {/* Per-deploy rollout trail — drawn before the dot.
-              Fix path chosen: hairline (option A) — bumped rolloutBase ~2.5x,
-              opacity to 0.7, stroke-width to 1.6. Reads as a continuous trace
-              of duration without competing with the dot punctuation. */}
+          {/* Trails */}
           {lane.deploys.map((d, i) => {
             const cx = padX + d.t * innerW;
             const trailW = d.rollout * innerW;
             const x1 = Math.max(padX, cx - trailW);
+            const isVisible = visible.has(d.status);
             return (
               <line
                 key={`trail-${i}`}
@@ -364,19 +600,26 @@ function LaneRow({
                 }
                 strokeWidth={1.6}
                 strokeLinecap="round"
-                opacity={d.status === "rolled-back" ? 0.5 : 0.7}
+                style={{
+                  opacity: isVisible
+                    ? d.status === "rolled-back"
+                      ? 0.5
+                      : 0.7
+                    : 0.1,
+                  transition: "opacity 200ms ease-out",
+                }}
               />
             );
           })}
 
-          {/* Dots — one per deploy. Hover handlers lift to the parent's
-              shared `hovered` state; the custom tooltip group renders last
-              in the SVG so it paints on top. */}
+          {/* Dots */}
           {lane.deploys.map((d, i) => {
             const cx = padX + d.t * innerW;
+            const isVisible = visible.has(d.status);
+            const dotOpacity = isVisible ? 1 : 0.15;
             const onEnter = () => setHovered({ deploy: d, lane });
             const onLeave = () => setHovered(null);
-            // Larger invisible hit target so small dots are still hoverable.
+            const onClick = () => setSelected({ deploy: d, lane });
             const hit = (
               <circle
                 cx={cx}
@@ -386,13 +629,19 @@ function LaneRow({
                 pointerEvents="all"
                 onMouseEnter={onEnter}
                 onMouseLeave={onLeave}
+                onClick={onClick}
+                style={{ cursor: "pointer" }}
               />
             );
             if (d.status === "live") {
               return (
-                <g key={`dot-${i}`}>
-                  {/* Calibrated live-pulse ring — opacity-only animation,
-                      keyframes defined in app/globals.css. */}
+                <g
+                  key={`dot-${i}`}
+                  style={{
+                    opacity: dotOpacity,
+                    transition: "opacity 200ms ease-out",
+                  }}
+                >
                   <circle
                     cx={cx}
                     cy={yDot}
@@ -414,7 +663,13 @@ function LaneRow({
             }
             if (d.status === "rolled-back") {
               return (
-                <g key={`dot-${i}`}>
+                <g
+                  key={`dot-${i}`}
+                  style={{
+                    opacity: dotOpacity,
+                    transition: "opacity 200ms ease-out",
+                  }}
+                >
                   <circle
                     cx={cx}
                     cy={yDot}
@@ -428,7 +683,13 @@ function LaneRow({
               );
             }
             return (
-              <g key={`dot-${i}`}>
+              <g
+                key={`dot-${i}`}
+                style={{
+                  opacity: dotOpacity,
+                  transition: "opacity 200ms ease-out",
+                }}
+              >
                 <circle
                   cx={cx}
                   cy={yDot}
@@ -440,10 +701,6 @@ function LaneRow({
             );
           })}
 
-          {/* Custom tooltip — rendered LAST so it paints over the dots.
-              Always present in the DOM; opacity toggles for the 120ms
-              ease-out exit. Position frozen to the last hovered deploy
-              during the exit so the tooltip doesn't jump. */}
           <DeployTooltip
             visible={!!isLaneHover}
             deploy={tooltipDeploy}
@@ -454,7 +711,12 @@ function LaneRow({
           />
         </svg>
 
-        {/* Sparse Trace beneath — deploy-frequency rolling average. */}
+        {/* Promote ghost dot — DOM overlay so it can translate from
+            the staging lane's vertical center DOWN to the production
+            lane's. We render the ghost on the production row so it
+            appears to land at the right destination. */}
+        {promoteArc && <PromoteGhost x={(promoteArc.fromX / W) * 100} top={yDot} />}
+
         <Trace
           data={lane.frequency}
           width={W}
@@ -465,8 +727,6 @@ function LaneRow({
           fill={{
             kind: "below",
             y: 0,
-            // Bumped 8% → 14% so the frequency Trace doesn't disappear into
-            // the dark-mode bg; theme-aware via color-mix on the muted token.
             color:
               "color-mix(in oklch, var(--color-text-muted) 14%, transparent)",
           }}
@@ -476,24 +736,28 @@ function LaneRow({
         />
       </div>
 
-      {/* Right gutter — count summary */}
+      {/* Right gutter */}
       <div className="flex flex-col items-end leading-tight">
-        <span
-          className="font-display text-[26px] leading-none italic tracking-[-0.02em] text-[var(--color-text)]"
+        <button
+          type="button"
+          aria-pressed={focused}
+          onClick={onToggleFocus}
+          className={
+            "font-display text-[26px] leading-none italic tracking-[-0.02em] text-[var(--color-text)] hover:text-[var(--color-accent-2)] " +
+            (focused ? "underline decoration-[var(--color-accent-2)] decoration-[1.5px] underline-offset-4" : "")
+          }
           style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
         >
           {lane.deploys.length}
-        </span>
+        </button>
         <span className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
-          deploys · 24h
+          deploys · {focused ? "focused" : "click to focus"}
         </span>
         {lane.deploys.some((d) => d.status === "fail") && (
           <span
             className="mt-0.5 inline-flex items-center gap-1.5 font-mono text-[10px] tracking-tight"
             style={{ color: "var(--color-accent)" }}
           >
-            {/* Leading persimmon dot ties this count to the legend swatch
-                so the colour-meaning binding is visible inline. */}
             <span
               aria-hidden
               className="h-1 w-1 rounded-full"
@@ -507,14 +771,6 @@ function LaneRow({
   );
 }
 
-/**
- * In-SVG tooltip for a deploy. Mono-caps eyebrow with the time anchor,
- * Fraunces italic body carrying `{sha} · {branch} · {status}`, plus a
- * formatted rollout duration. Position resolves above the dot, flipping
- * below when there's no room (top of the SVG). Opacity toggles for the
- * 120ms ease-out exit; geometry is held during the fade so it doesn't
- * jump.
- */
 function DeployTooltip({
   visible,
   deploy,
@@ -544,7 +800,6 @@ function DeployTooltip({
   const xRaw = cx - TIP_W / 2;
   const x = Math.max(0, Math.min(laneW - TIP_W, xRaw));
 
-  // Approximate clock time for the eyebrow — t in [0,1] across the 24h window.
   const totalMin = Math.round(deploy.t * 24 * 60);
   const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, "0");
   const mm = String(totalMin % 60).padStart(2, "0");
@@ -601,25 +856,30 @@ function DeployTooltip({
   );
 }
 
-/**
- * Shared 24h x-axis label row — sits beneath the three lanes and labels the
- * tick marks each lane already draws. Geometry mirrors LaneRow (132px label
- * column + 1fr lane body + 120px gutter, padX 8 inside the SVG) so labels
- * land directly under their ticks. Renders once for all three lanes; not
- * per-lane.
- */
-function TimeAxis() {
+function TimeAxis({ windowId }: { windowId: WindowId }) {
   const W = 720;
   const H = 12;
   const padX = 8;
   const innerW = W - padX * 2;
-  const ticks: Array<{ t: number; label: string; anchor: "start" | "middle" | "end" }> = [
-    { t: 0, label: "00", anchor: "start" },
-    { t: 0.25, label: "06", anchor: "middle" },
-    { t: 0.5, label: "12", anchor: "middle" },
-    { t: 0.75, label: "18", anchor: "middle" },
-    { t: 1, label: "now", anchor: "end" },
-  ];
+  const ticks: Record<WindowId, Array<{ t: number; label: string; anchor: "start" | "middle" | "end" }>> = {
+    "24h": [
+      { t: 0, label: "00", anchor: "start" },
+      { t: 0.25, label: "06", anchor: "middle" },
+      { t: 0.5, label: "12", anchor: "middle" },
+      { t: 0.75, label: "18", anchor: "middle" },
+      { t: 1, label: "now", anchor: "end" },
+    ],
+    "7d": [
+      { t: 0, label: "−7d", anchor: "start" },
+      { t: 0.5, label: "−3d", anchor: "middle" },
+      { t: 1, label: "now", anchor: "end" },
+    ],
+    "30d": [
+      { t: 0, label: "−30d", anchor: "start" },
+      { t: 0.5, label: "−15d", anchor: "middle" },
+      { t: 1, label: "now", anchor: "end" },
+    ],
+  };
   return (
     <div className="grid shrink-0 grid-cols-[132px_1fr_120px] items-center gap-4 border-t border-[var(--color-border)] px-6 py-1.5">
       <div aria-hidden />
@@ -629,10 +889,10 @@ function TimeAxis() {
           width="100%"
           height={H}
           className="block"
-          aria-label="24-hour window axis"
+          aria-label="Window axis"
           shapeRendering="geometricPrecision"
         >
-          {ticks.map((tk) => (
+          {ticks[windowId].map((tk) => (
             <text
               key={tk.label}
               x={padX + tk.t * innerW}
@@ -656,53 +916,132 @@ function TimeAxis() {
   );
 }
 
-function StatusLegend() {
-  const items: Array<{ status: DeployStatus; label: string }> = [
-    { status: "ok", label: "succeeded" },
-    { status: "fail", label: "failed" },
-    { status: "rolled-back", label: "rolled back" },
-    { status: "live", label: "in-flight" },
-  ];
+function DeployDetailPanel({
+  selected,
+  onPromote,
+  onRollback,
+  onClose,
+}: {
+  selected: { deploy: Deploy; lane: Lane };
+  onPromote: () => void;
+  onRollback: () => void;
+  onClose: () => void;
+}) {
+  const { deploy, lane } = selected;
+  const author = authorFor(deploy);
+  const totalMin = Math.round(deploy.t * 24 * 60);
+  const hh = String(Math.floor(totalMin / 60) % 24).padStart(2, "0");
+  const mm = String(totalMin % 60).padStart(2, "0");
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-[var(--color-border)] px-6 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
-      <span aria-hidden>Deploy key</span>
-      {items.map((it) => (
-        <span key={it.status} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-          {it.status === "rolled-back" ? (
-            <span
-              aria-hidden
-              className="h-1.5 w-1.5 rounded-full border"
-              style={{ borderColor: "var(--color-text-muted)" }}
-            />
-          ) : it.status === "live" ? (
-            <span
-              aria-hidden
-              className="grid h-2 w-2 place-items-center rounded-full"
-              style={{ boxShadow: "inset 0 0 0 1px var(--color-accent-2)" }}
-            >
-              <span
-                className="h-1 w-1 rounded-full"
-                style={{ background: "var(--color-accent-2)" }}
-              />
-            </span>
-          ) : (
-            <span
-              aria-hidden
-              className="h-1 w-1 rounded-full"
-              style={{ background: STATUS_INK[it.status] }}
-            />
-          )}
-          <span>{it.label}</span>
+    <div className="flex h-full flex-col">
+      <div className="flex items-baseline justify-between border-b border-[var(--color-border)] px-5 py-3">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+            {lane.label} · {STATUS_LABEL[deploy.status]}
+          </div>
+          <div
+            className="mt-1 font-display text-[22px] italic leading-none text-[var(--color-text)]"
+            style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+          >
+            {deploy.sha}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+          aria-label="Close detail"
+        >
+          esc
+        </button>
+      </div>
+      <div className="grid flex-1 grid-cols-2 gap-4 px-5 py-4 text-xs">
+        <Field label="Branch">{deploy.branch}</Field>
+        <Field label="Time">{hh}:{mm} UTC</Field>
+        <Field label="Rollout">{formatRollout(deploy.rolloutSeconds)}</Field>
+        <Field label="Status">{STATUS_LABEL[deploy.status]}</Field>
+        <div className="col-span-2">
+          <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            Commit
+          </div>
+          <p className="mt-1 text-[13px] text-[var(--color-text)]">
+            {commitMessageFor(deploy)}
+          </p>
+        </div>
+        <div className="col-span-2 flex items-center gap-2">
+          <span
+            title={author.name}
+            className="grid h-6 w-6 place-items-center rounded-full bg-[var(--color-bg)] font-mono text-[10px] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]"
+          >
+            {author.initials}
+          </span>
+          <span className="text-[13px] text-[var(--color-text)]">{author.name}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 border-t border-[var(--color-border)] px-5 py-3">
+        {lane.env === "staging" && deploy.status !== "live" && (
+          <button
+            type="button"
+            onClick={onPromote}
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--color-accent-2)_70%,#000_8%)] bg-[var(--color-accent-2)] px-3 text-xs text-[var(--color-accent-fg)]"
+          >
+            Promote → production
+          </button>
+        )}
+        {lane.env === "production" && (
+          <button
+            type="button"
+            onClick={onRollback}
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-sm)] border border-[var(--color-border-strong)] bg-[var(--color-surface)] px-3 text-xs text-[var(--color-text)]"
+          >
+            Rollback
+          </button>
+        )}
+        <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+          {lane.label} · {deploy.branch}
         </span>
-      ))}
-      <span className="ml-auto inline-flex items-center gap-1.5">
-        <span
-          aria-hidden
-          className="h-px w-4"
-          style={{ background: "var(--color-text-muted)", opacity: 0.55 }}
-        />
-        <span>trail = rollout duration</span>
-      </span>
+      </div>
+    </div>
+  );
+}
+
+function PromoteGhost({ x, top }: { x: number; top: number }) {
+  // We use a transform-only animation via inline style + Web Animations API
+  // would be ideal, but a CSS transition driven by a state flip is simpler
+  // and works without keyframes. translateY goes from -72px → 0 over 320ms.
+  const [arrived, setArrived] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setArrived(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute"
+      style={{
+        left: `${x}%`,
+        top,
+        width: 4,
+        height: 4,
+        marginLeft: -2,
+        marginTop: -2,
+        borderRadius: 999,
+        background: "var(--color-accent-2)",
+        transform: arrived ? "translateY(0)" : "translateY(-72px)",
+        opacity: arrived ? 1 : 0.4,
+        transition: `transform 320ms cubic-bezier(0.32, 0.72, 0, 1), opacity 320ms cubic-bezier(0.32, 0.72, 0, 1)`,
+      }}
+    />
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+        {label}
+      </div>
+      <div className="mt-1 text-[13px] text-[var(--color-text)]">{children}</div>
     </div>
   );
 }
