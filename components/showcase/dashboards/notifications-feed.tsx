@@ -810,10 +810,10 @@ function StickySection({
 
 /* ────────────────────────── unread glyph ────────────────────────── */
 
-function UnreadGlyph({ filled, accent }: { filled: boolean; accent?: string }) {
+function UnreadGlyph({ filled }: { filled: boolean }) {
   // Encodes read-state by glyph WEIGHT, not color — survives grayscale.
   // Filled circle for unread, hollow ring for read. Same color either way.
-  const fill = accent ?? "var(--color-text)";
+  const fill = "var(--color-text)";
   return (
     <svg width={8} height={8} viewBox="0 0 8 8" aria-hidden>
       {filled ? (

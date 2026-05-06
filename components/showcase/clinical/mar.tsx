@@ -321,7 +321,6 @@ export default function MAR() {
   const [meds, setMeds] = React.useState<Med[]>(MEDS);
   const [focus, setFocus] = React.useState<{ row: number; col: number }>({ row: 0, col: 1 });
   const [chartOpen, setChartOpen] = React.useState<{ row: number; col: number } | null>(null);
-  const gridRef = React.useRef<HTMLDivElement>(null);
 
   const onKeyDown: React.KeyboardEventHandler<HTMLDivElement> = (e) => {
     const { row, col } = focus;
@@ -483,7 +482,6 @@ export default function MAR() {
 
         {/* Grid body */}
         <div
-          ref={gridRef}
           role="grid"
           aria-label="Medication administration grid"
           tabIndex={-1}

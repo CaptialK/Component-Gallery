@@ -111,8 +111,6 @@ const INITIAL: Values = {
   ],
 };
 
-const PAPER_EASE = "cubic-bezier(0.32, 0.72, 0, 1)";
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SLUG_RE = /^[a-z0-9-]+$/;
 const URL_RE = /^https?:\/\/[^\s]+$/;
