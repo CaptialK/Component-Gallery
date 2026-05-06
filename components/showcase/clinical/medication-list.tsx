@@ -1,14 +1,32 @@
+import { AbnormalFlag } from "@/components/_kit/abnormal-flag";
+
 /**
  * Medication list — active home & inpatient medications with a 24-hour
  * scheduled-dose strip per row. The strip is the dot-language commitment of
  * this plate: each scheduled dose is one dot, position encodes time of day,
- * fill encodes status (given · upcoming · overdue · suspended). The eye
- * reads a med's adherence in one line, before reading the dose or frequency.
+ * fill encodes status (given · upcoming · overdue · suspended).
+ *
+ * Refactored 2026-05-05 (Builder C, medical standard pass): high-alert meds
+ * (heparin, insulin) now render an <AbnormalFlag severity="high-alert">
+ * adjacent to the dose line — the pharmacy rubber-stamp convention — instead
+ * of a colour-only mono-caps tag. The single overdue heparin row gets a
+ * banner-level inline alert at the top of the list. Hold-reason is now
+ * structured (drug · because-of · recheck-at) rather than free text, and PRN
+ * given doses render as a square mark to disambiguate from scheduled-given.
  *
  * Pure server component. Realistic but mock data; no PHI.
  */
 
 type DoseStatus = "given" | "upcoming" | "overdue" | "skipped";
+
+type HoldReason = {
+  /** Short reason — "INR" / "renal function" / "NPO". */
+  becauseOf: string;
+  /** Optional structured value that triggered the hold. */
+  triggerValue?: string;
+  /** When to recheck. */
+  recheckAt?: string;
+};
 
 type Med = {
   id: string;
@@ -16,16 +34,20 @@ type Med = {
   brand?: string;
   dose: string;          // "10 mg"
   route: "PO" | "IV" | "SC" | "PRN";
-  freq: string;          // "daily" | "BID" | "QHS" | etc.
+  freq: string;          // "Once daily" | "BID" | "QHS" | etc.
   /** Times of day (24h floats, e.g. 7.5 = 07:30) when scheduled. */
   schedule: number[];
   /** Doses already administered today (subset of schedule). */
   givenAt: number[];
+  /** Optional PRN administrations — visually distinct from scheduled given. */
+  prnGivenAt?: number[];
   /** Anything pending past its scheduled time but not given. */
   overdueAt?: number[];
   state: "active" | "held" | "discontinued";
-  high?: boolean;
+  /** ISMP "high-alert" classification (anticoagulants, insulins, opioids, etc.). */
+  highAlert?: boolean;
   notes?: string;
+  hold?: HoldReason;
 };
 
 const NOW = 14.13; // 14:08 — used to colour past/future, render the now-mark
@@ -77,15 +99,28 @@ const MEDS: Med[] = [
   {
     id: "heparin",
     name: "Heparin",
-    dose: "5,000 U",
+    dose: "5,000 units",
     route: "SC",
     freq: "q8h",
     schedule: [6, 14, 22],
     givenAt: [6],
     overdueAt: [14],
     state: "active",
-    high: true,
+    highAlert: true,
     notes: "VTE prophylaxis",
+  },
+  {
+    id: "insulin",
+    name: "Insulin lispro",
+    brand: "Humalog",
+    dose: "Sliding scale",
+    route: "SC",
+    freq: "AC + HS",
+    schedule: [7.5, 12, 17.5, 22],
+    givenAt: [7.5, 12],
+    state: "active",
+    highAlert: true,
+    notes: "Per protocol — verify BG before dose",
   },
   {
     id: "ondansetron",
@@ -95,7 +130,8 @@ const MEDS: Med[] = [
     route: "IV",
     freq: "PRN nausea",
     schedule: [],
-    givenAt: [10.7],
+    givenAt: [],
+    prnGivenAt: [10.7],
     state: "active",
   },
   {
@@ -103,17 +139,28 @@ const MEDS: Med[] = [
     name: "Warfarin",
     dose: "—",
     route: "PO",
-    freq: "Held pending INR",
+    freq: "Once daily — held",
     schedule: [],
     givenAt: [],
     state: "held",
-    notes: "Last INR 3.6 (target 2–3)",
+    hold: {
+      becauseOf: "supratherapeutic INR",
+      triggerValue: "INR 3.6 (target 2–3)",
+      recheckAt: "tomorrow AM",
+    },
   },
 ];
 
+function fmtTime(t: number): string {
+  const h = Math.floor(t);
+  const m = Math.round((t - h) * 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 export default function MedicationList() {
-  const high = MEDS.filter((m) => m.high && m.state === "active").length;
-  const overdue = MEDS.filter((m) => (m.overdueAt?.length ?? 0) > 0).length;
+  const high = MEDS.filter((m) => m.highAlert && m.state === "active").length;
+  const overdueMeds = MEDS.filter((m) => (m.overdueAt?.length ?? 0) > 0);
+  const overdueCount = overdueMeds.length;
 
   return (
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
@@ -121,16 +168,48 @@ export default function MedicationList() {
         {/* Header */}
         <div className="border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
-            Medications · Patel, R. · MAR
+            Medications · Patel, R. · MRN 7741286 · MAR · last sync 14:08
           </div>
           <p
             className="mt-1 font-display text-[18px] italic leading-tight text-[var(--color-text)]"
             style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
           >
             {MEDS.filter((m) => m.state === "active").length} active ·{" "}
-            {high} high-alert · {overdue} overdue
+            {high} high-alert · {overdueCount} overdue
+          </p>
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+            CrCl 62 mL/min · weight 78 kg
           </p>
         </div>
+
+        {/* Overdue banner — load-bearing critical event for this plate. */}
+        {overdueMeds.map((m) => {
+          const at = m.overdueAt![0];
+          const ageMin = Math.max(0, Math.round((NOW - at) * 60));
+          return (
+            <div
+              key={`overdue-${m.id}`}
+              role="alert"
+              className="flex shrink-0 items-center gap-3 border-b border-[var(--color-accent)] bg-[color-mix(in_oklch,var(--color-accent)_8%,var(--color-bg))] px-6 py-2"
+            >
+              <AbnormalFlag
+                severity="panic"
+                reason={`${m.name} ${fmtTime(at)} dose overdue ${ageMin} minutes`}
+                size="md"
+              />
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-accent)]">
+                overdue
+              </span>
+              <span className="text-[12.5px] text-[var(--color-text)]">
+                <span className="font-medium">{m.name}</span>{" "}
+                <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-muted)]">
+                  {m.dose} {m.route}
+                </span>{" "}
+                — {fmtTime(at)} dose <span className="font-medium">{ageMin} minutes late.</span>
+              </span>
+            </div>
+          );
+        })}
 
         {/* Day strip ruler — single 24h ruler at the top, scheduled-dose
             timeline below uses the same x-axis. */}
@@ -152,8 +231,9 @@ export default function MedicationList() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Each dot is one scheduled dose. Walnut: given. Federal Blue ring:
-          due now. Persimmon: overdue. Hairline: 14:08, the present.
+          Each dot is one scheduled dose. Walnut: given. Federal Blue ring: due
+          now. Persimmon: overdue. Square: PRN given. Hairline: 14:08, the
+          present.
         </p>
       </div>
     </div>
@@ -166,12 +246,6 @@ const STRIP_PADDING_X = 10;
 function timeToX(t: number, width: number) {
   const innerW = width - STRIP_PADDING_X * 2;
   return STRIP_PADDING_X + (t / 24) * innerW;
-}
-
-function fmtTime(t: number): string {
-  const h = Math.floor(t);
-  const m = Math.round((t - h) * 60);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
 function DayRuler() {
@@ -190,7 +264,6 @@ function DayRuler() {
         className="block"
         aria-hidden="true"
       >
-        {/* Hour ticks. */}
         {HOURS_LABELS.map((h) => {
           const x = timeToX(h, stripW);
           return (
@@ -220,7 +293,6 @@ function DayRuler() {
             </g>
           );
         })}
-        {/* Now marker — Federal Blue hairline. */}
         <line
           x1={timeToX(NOW, stripW)}
           x2={timeToX(NOW, stripW)}
@@ -236,11 +308,17 @@ function DayRuler() {
 
 function MedRow({ med }: { med: Med }) {
   const dim = med.state !== "active";
+  const overdueCount = med.overdueAt?.length ?? 0;
+  const givenCount = med.givenAt.length + (med.prnGivenAt?.length ?? 0);
+  const upcomingCount = med.schedule.filter(
+    (t) => t >= NOW && !med.givenAt.includes(t),
+  ).length;
+  const stripAria = `Dose schedule for ${med.name}: ${givenCount} given, ${overdueCount} overdue, ${upcomingCount} upcoming.`;
 
   return (
     <li className="grid grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-[var(--color-border)] px-6 py-3 hover:bg-[var(--color-surface)]">
       {/* State dot — uses size & ink as ordinal cue, not colour-only. */}
-      <StateDot state={med.state} high={med.high} />
+      <StateDot state={med.state} highAlert={med.highAlert} />
 
       <div className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5">
@@ -254,21 +332,29 @@ function MedRow({ med }: { med: Med }) {
             {med.name}
           </span>
           {med.brand && (
-            <span className="font-display text-[12px] italic text-[var(--color-text-muted)]"
+            <span
+              className="font-display text-[12px] italic text-[var(--color-text-muted)]"
               style={{ fontVariationSettings: '"opsz" 18, "SOFT" 30' }}
             >
               ({med.brand})
             </span>
           )}
-          <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--color-text)]">
+          <span className="font-mono text-[11px] uppercase tracking-[0.12em] tabular-nums text-[var(--color-text)]">
             {med.dose}
           </span>
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
             {med.route}
           </span>
-          {med.high && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-danger)]">
-              high-alert
+          {med.highAlert && (
+            <span className="inline-flex items-center gap-1">
+              <AbnormalFlag
+                severity="high-alert"
+                reason={`${med.name} — high-alert medication; double-check dose, patient, and indication`}
+                size="sm"
+              />
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text)]">
+                high-alert
+              </span>
             </span>
           )}
         </div>
@@ -280,14 +366,35 @@ function MedRow({ med }: { med: Med }) {
               <span className="italic">{med.notes}</span>
             </>
           )}
+          {/* Structured hold reason — load-bearing for the warfarin row. */}
+          {med.hold && (
+            <span className="ml-2 inline-flex items-baseline gap-1.5">
+              <span aria-hidden className="font-mono text-[var(--color-text-muted)]">·</span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-warning)]">
+                held — {med.hold.becauseOf}
+              </span>
+              {med.hold.triggerValue && (
+                <span className="font-mono text-[10px] tabular-nums text-[var(--color-text)]">
+                  {med.hold.triggerValue}
+                </span>
+              )}
+              {med.hold.recheckAt && (
+                <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+                  · recheck {med.hold.recheckAt}
+                </span>
+              )}
+            </span>
+          )}
         </div>
       </div>
 
       <ScheduleStrip
         schedule={med.schedule}
         givenAt={med.givenAt}
+        prnGivenAt={med.prnGivenAt ?? []}
         overdueAt={med.overdueAt ?? []}
         held={med.state === "held"}
+        ariaLabel={stripAria}
       />
     </li>
   );
@@ -295,17 +402,25 @@ function MedRow({ med }: { med: Med }) {
 
 function StateDot({
   state,
-  high,
+  highAlert,
 }: {
   state: Med["state"];
-  high?: boolean;
+  highAlert?: boolean;
 }) {
   const cell = 14;
   const c = cell / 2;
   if (state === "discontinued") {
     return (
       <svg width={cell} height={cell} viewBox={`0 0 ${cell} ${cell}`} aria-label="Discontinued">
-        <circle cx={c} cy={c} r={4} fill="none" stroke="var(--color-text-muted)" strokeWidth="0.8" strokeDasharray="1.5 1.5" />
+        <circle
+          cx={c}
+          cy={c}
+          r={4}
+          fill="none"
+          stroke="var(--color-text-muted)"
+          strokeWidth="0.8"
+          strokeDasharray="1.5 1.5"
+        />
       </svg>
     );
   }
@@ -317,13 +432,30 @@ function StateDot({
       </svg>
     );
   }
+  // active — high-alert meds get a slightly larger walnut dot wrapped in a
+  // persimmon ring, matching the AbnormalFlag's high-alert convention.
   return (
-    <svg width={cell} height={cell} viewBox={`0 0 ${cell} ${cell}`} aria-label="Active">
+    <svg
+      width={cell}
+      height={cell}
+      viewBox={`0 0 ${cell} ${cell}`}
+      aria-label={highAlert ? "Active, high-alert medication" : "Active"}
+    >
+      {highAlert && (
+        <circle
+          cx={c}
+          cy={c}
+          r={5.5}
+          fill="none"
+          stroke="var(--color-accent)"
+          strokeWidth="1"
+        />
+      )}
       <circle
         cx={c}
         cy={c}
-        r={high ? 4.5 : 3.5}
-        fill={high ? "var(--color-danger)" : "var(--color-text)"}
+        r={3.5}
+        fill="var(--color-text)"
       />
     </svg>
   );
@@ -332,19 +464,21 @@ function StateDot({
 function ScheduleStrip({
   schedule,
   givenAt,
+  prnGivenAt,
   overdueAt,
   held,
+  ariaLabel,
 }: {
   schedule: number[];
   givenAt: number[];
+  prnGivenAt: number[];
   overdueAt: number[];
   held: boolean;
+  ariaLabel: string;
 }) {
   const W = 360;
   const H = 22;
 
-  // Build a status map keyed by time. (Same time can only have one slot
-  // per definition, so this is unambiguous.)
   const statusAt = new Map<number, DoseStatus>();
   for (const t of schedule) {
     statusAt.set(t, t < NOW ? "skipped" : "upcoming");
@@ -361,7 +495,7 @@ function ScheduleStrip({
       viewBox={`0 0 ${W} ${H}`}
       className="block"
       role="img"
-      aria-label="Dose schedule for the last and next twelve hours"
+      aria-label={ariaLabel}
     >
       {/* Hairline timeline. */}
       <line
@@ -373,8 +507,7 @@ function ScheduleStrip({
         strokeWidth="0.5"
       />
 
-      {/* Now marker, repeated under each strip so the eye can compare
-          across rows easily. Federal Blue hairline. */}
+      {/* Now marker. */}
       <line
         x1={timeToX(NOW, W)}
         x2={timeToX(NOW, W)}
@@ -384,8 +517,6 @@ function ScheduleStrip({
         strokeWidth="1"
       />
 
-      {/* Held meds: render a quiet stipple stripe across the row, no event
-          dots. The schedule has been suspended; the visual must say so. */}
       {held && (
         <g>
           {Array.from({ length: 22 }).map((_, i) => {
@@ -403,6 +534,28 @@ function ScheduleStrip({
           })}
         </g>
       )}
+
+      {/* PRN given doses — square marks so they don't get confused with
+          scheduled-given dots. PRNs render even when the row has no
+          schedule (the canonical case is Zofran). */}
+      {!held &&
+        prnGivenAt.map((t, i) => {
+          const x = timeToX(t, W);
+          const y = H / 2;
+          return (
+            <g key={`prn-${i}-${t}`}>
+              <title>{`${fmtTime(t)} — PRN given`}</title>
+              <rect
+                x={x - 2}
+                y={y - 2}
+                width={4}
+                height={4}
+                fill="var(--color-text)"
+                opacity={0.85}
+              />
+            </g>
+          );
+        })}
 
       {/* Event dots. */}
       {!held &&
@@ -428,7 +581,6 @@ function ScheduleStrip({
               {s === "overdue" && (
                 <>
                   <circle cx={x} cy={y} r={2.6} fill="var(--color-accent)" />
-                  {/* Stippled halo — mirrors the live-marker vocabulary. */}
                   {Array.from({ length: 8 }).map((_, j) => {
                     const a = (j / 8) * Math.PI * 2;
                     return (

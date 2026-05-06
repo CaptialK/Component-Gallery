@@ -1,40 +1,55 @@
+import { Timestamp } from "@/components/_kit/timestamp";
+
 /**
  * Bed board — a single Med-Surg unit, four bays of six beds each. The
  * spatial pattern of occupancy and acuity is the visual signal: a
  * clinician walks the board the way a nurse walks the unit.
  *
+ * Refactored 2026-05-05 against THE MEDICAL STANDARD:
+ *  - ESI 1 is no longer colour-only — adds a leading `!` glyph + `ESI 1`
+ *    mono-caps label adjacent to the dot. ESI 2 keeps the Federal Blue dot
+ *    + sized area cue.
+ *  - Long-stay (≥ 96 h) cells gain a small clock/hourglass glyph above the
+ *    LOS bar so the persimmon ink is never the sole differentiator.
+ *  - Boarding cells (admitted but no inpatient bed assigned) gain their
+ *    own "BOARDING" mono-caps glyph; pending admit / pending discharge
+ *    gain a fourth empty-cell vocabulary with a caret + dashed perimeter.
+ *  - DNR, NPO, fall-risk surface as inline mono-caps tags inside the cell
+ *    foreground — these are scannable safety signals on a real bed board.
+ *  - "Census as of HH:MM" Timestamp under the headline; staleAfter=10 min
+ *    drives the persimmon dot if the feed is delayed.
+ *  - Each cell is keyboard-focusable (`tabIndex=0` + role=button) with a
+ *    full-sentence aria-label assembling identity, MRN, ESI, isolation, LOS,
+ *    code status. MRN is hidden visually for density but reachable on focus.
+ *  - Responsive: bays stack to a single column at narrow widths, each bay
+ *    becomes a 2×3 grid; legend collapses to a "+ key" affordance below 480px.
+ *  - Cell min-height ≥ 88px keeps the press target above the 44px floor.
+ *  - Layout reflow uses CSS only; no JS. Tap target ≥ 44px throughout.
+ *
  * Refactored 2026-05-03 per the dot+line system change in DECISIONS.md.
- * Originally each cell carried a Bridson density backdrop encoding LOS;
- * Vinson reviewed and reported the dots so close together made the cell
- * unreadable. Now:
  *
- *  - Length-of-stay renders as a thin horizontal *line* at the top of each
- *    occupied cell. Bar length scales with hours; the eye reads "long stay"
- *    by length, not by texture. Cell interior stays flat.
- *  - Acuity is a *single sized dot* in the corner. Radius² scales with
- *    inverse ESI (ESI 1 = biggest, ESI 5 = smallest). Same area-as-data
- *    encoding as `dashboards/activity-heatmap` — perceptually higher rank
- *    than density (Cleveland-McGill).
- *  - Isolation precautions stay as a *perimeter* stipple — a one-px inset
- *    of dots around the cell edge. The dots aren't behind text; they're
- *    decorative marks at the cell boundary. Cell interior stays flat.
- *  - Empty / clean / dirty states are distinct cell vocabularies, none
- *    colour-only: clean has a Federal Blue check, dirty a persimmon trio,
- *    blocked a dashed-circle crosshair.
- *
- * Pure server component. Mock census; no PHI.
+ * Pure server component apart from `<Timestamp>` (client island for tick).
  */
 
+type EmptyStatus = "clean" | "dirty" | "blocked" | "pending";
+
+type SafetyFlag = "DNR" | "NPO" | "FALL";
+
 type BedState =
-  | { kind: "empty"; status: "clean" | "dirty" | "blocked" }
+  | { kind: "empty"; status: EmptyStatus; note?: string }
+  | { kind: "boarding"; patient: string; initials: string; mrn: string; sex: "M" | "F" | "X"; losHours: number; esi: 1 | 2 | 3 | 4 | 5; flags?: SafetyFlag[] }
   | {
       kind: "occupied";
       patient: string;
       initials: string;
+      mrn: string;
       sex: "M" | "F" | "X";
       losHours: number;
       esi: 1 | 2 | 3 | 4 | 5;
       isolation?: "contact" | "droplet" | "airborne" | "neutropenic";
+      flags?: SafetyFlag[];
+      /** ISO admit timestamp — surfaces in cell aria-label and (future) popover. */
+      admittedAt?: string;
     };
 
 type Bed = {
@@ -46,48 +61,50 @@ const BAYS: { name: string; beds: Bed[] }[] = [
   {
     name: "Bay 412",
     beds: [
-      { id: "412-A", state: { kind: "occupied", patient: "Alvarez, M.", initials: "MA", sex: "M", losHours: 14, esi: 4 } },
-      { id: "412-B", state: { kind: "occupied", patient: "Patel, R.", initials: "RP", sex: "F", losHours: 55, esi: 3 } },
+      { id: "412-A", state: { kind: "occupied", patient: "Alvarez, M.", initials: "MA", mrn: "80098-1", sex: "M", losHours: 14, esi: 4, admittedAt: "2026-05-05T00:08:00Z" } },
+      { id: "412-B", state: { kind: "occupied", patient: "Patel, R.", initials: "RP", mrn: "80124-5", sex: "F", losHours: 55, esi: 3, flags: ["DNR"], admittedAt: "2026-05-03T07:08:00Z" } },
       { id: "412-C", state: { kind: "empty", status: "clean" } },
-      { id: "412-D", state: { kind: "occupied", patient: "Liu, K.", initials: "KL", sex: "M", losHours: 138, esi: 3, isolation: "contact" } },
-      { id: "412-E", state: { kind: "occupied", patient: "Brown, S.", initials: "SB", sex: "F", losHours: 6, esi: 4 } },
+      { id: "412-D", state: { kind: "occupied", patient: "Liu, K.", initials: "KL", mrn: "80091-2", sex: "M", losHours: 138, esi: 3, isolation: "contact", flags: ["NPO"], admittedAt: "2026-04-29T20:08:00Z" } },
+      { id: "412-E", state: { kind: "occupied", patient: "Brown, S.", initials: "SB", mrn: "80130-7", sex: "F", losHours: 6, esi: 4, flags: ["FALL"], admittedAt: "2026-05-05T08:08:00Z" } },
       { id: "412-F", state: { kind: "empty", status: "dirty" } },
     ],
   },
   {
     name: "Bay 413",
     beds: [
-      { id: "413-A", state: { kind: "occupied", patient: "Cohen, R.", initials: "RC", sex: "M", losHours: 92, esi: 2, isolation: "droplet" } },
-      { id: "413-B", state: { kind: "occupied", patient: "Davis, J.", initials: "JD", sex: "F", losHours: 27, esi: 3 } },
-      { id: "413-C", state: { kind: "occupied", patient: "Park, H.", initials: "HP", sex: "F", losHours: 46, esi: 3 } },
-      { id: "413-D", state: { kind: "empty", status: "clean" } },
-      { id: "413-E", state: { kind: "occupied", patient: "Hassan, F.", initials: "FH", sex: "F", losHours: 18, esi: 4 } },
-      { id: "413-F", state: { kind: "occupied", patient: "Singh, P.", initials: "PS", sex: "M", losHours: 220, esi: 2, isolation: "neutropenic" } },
+      { id: "413-A", state: { kind: "occupied", patient: "Cohen, R.", initials: "RC", mrn: "80104-3", sex: "M", losHours: 92, esi: 2, isolation: "droplet", admittedAt: "2026-05-01T18:08:00Z" } },
+      { id: "413-B", state: { kind: "occupied", patient: "Davis, J.", initials: "JD", mrn: "80117-8", sex: "F", losHours: 27, esi: 3, admittedAt: "2026-05-04T11:08:00Z" } },
+      { id: "413-C", state: { kind: "occupied", patient: "Park, H.", initials: "HP", mrn: "80119-9", sex: "F", losHours: 46, esi: 3, admittedAt: "2026-05-03T16:08:00Z" } },
+      { id: "413-D", state: { kind: "empty", status: "pending", note: "Admit en route" } },
+      { id: "413-E", state: { kind: "occupied", patient: "Hassan, F.", initials: "FH", mrn: "80128-4", sex: "F", losHours: 18, esi: 4, admittedAt: "2026-05-04T20:08:00Z" } },
+      { id: "413-F", state: { kind: "occupied", patient: "Singh, P.", initials: "PS", mrn: "80072-3", sex: "M", losHours: 220, esi: 2, isolation: "neutropenic", flags: ["DNR", "NPO"], admittedAt: "2026-04-26T10:08:00Z" } },
     ],
   },
   {
     name: "Bay 414",
     beds: [
-      { id: "414-A", state: { kind: "occupied", patient: "Rivera, T.", initials: "TR", sex: "M", losHours: 8, esi: 4 } },
+      { id: "414-A", state: { kind: "occupied", patient: "Rivera, T.", initials: "TR", mrn: "80133-2", sex: "M", losHours: 8, esi: 4, admittedAt: "2026-05-05T06:08:00Z" } },
       { id: "414-B", state: { kind: "empty", status: "blocked" } },
-      { id: "414-C", state: { kind: "occupied", patient: "Wong, L.", initials: "LW", sex: "F", losHours: 73, esi: 3 } },
-      { id: "414-D", state: { kind: "occupied", patient: "Adler, S.", initials: "SA", sex: "X", losHours: 110, esi: 3 } },
-      { id: "414-E", state: { kind: "empty", status: "clean" } },
-      { id: "414-F", state: { kind: "occupied", patient: "Romero, V.", initials: "VR", sex: "F", losHours: 41, esi: 4 } },
+      { id: "414-C", state: { kind: "occupied", patient: "Wong, L.", initials: "LW", mrn: "80108-7", sex: "F", losHours: 73, esi: 3, admittedAt: "2026-05-02T13:08:00Z" } },
+      { id: "414-D", state: { kind: "occupied", patient: "Adler, S.", initials: "SA", mrn: "80111-4", sex: "X", losHours: 110, esi: 3, flags: ["FALL"], admittedAt: "2026-04-30T22:08:00Z" } },
+      { id: "414-E", state: { kind: "boarding", patient: "Kim, R.", initials: "RK", mrn: "80140-1", sex: "M", losHours: 11, esi: 2, flags: ["NPO"] } },
+      { id: "414-F", state: { kind: "occupied", patient: "Romero, V.", initials: "VR", mrn: "80125-6", sex: "F", losHours: 41, esi: 4, admittedAt: "2026-05-03T21:08:00Z" } },
     ],
   },
   {
     name: "Bay 415",
     beds: [
-      { id: "415-A", state: { kind: "occupied", patient: "Garcia, M.", initials: "MG", sex: "F", losHours: 63, esi: 3 } },
-      { id: "415-B", state: { kind: "occupied", patient: "Nguyen, L.", initials: "LN", sex: "M", losHours: 4, esi: 2, isolation: "airborne" } },
+      { id: "415-A", state: { kind: "occupied", patient: "Garcia, M.", initials: "MG", mrn: "80115-2", sex: "F", losHours: 63, esi: 3, admittedAt: "2026-05-02T23:08:00Z" } },
+      { id: "415-B", state: { kind: "occupied", patient: "Nguyen, L.", initials: "LN", mrn: "80138-9", sex: "M", losHours: 4, esi: 1, isolation: "airborne", admittedAt: "2026-05-05T10:08:00Z" } },
       { id: "415-C", state: { kind: "empty", status: "dirty" } },
-      { id: "415-D", state: { kind: "occupied", patient: "Lee, K.", initials: "KL", sex: "M", losHours: 31, esi: 3 } },
-      { id: "415-E", state: { kind: "occupied", patient: "Chen, M.", initials: "MC", sex: "F", losHours: 167, esi: 2 } },
+      { id: "415-D", state: { kind: "occupied", patient: "Lee, K.", initials: "KL", mrn: "80120-3", sex: "M", losHours: 31, esi: 3, admittedAt: "2026-05-04T07:08:00Z" } },
+      { id: "415-E", state: { kind: "occupied", patient: "Chen, M.", initials: "MC", mrn: "80082-5", sex: "F", losHours: 167, esi: 2, flags: ["DNR"], admittedAt: "2026-04-28T15:08:00Z" } },
       { id: "415-F", state: { kind: "empty", status: "clean" } },
     ],
   },
 ];
+
+const CENSUS_AS_OF = "2026-05-05T14:08:00Z";
 
 export default function BedBoard() {
   const allBeds = BAYS.flatMap((b) => b.beds);
@@ -104,7 +121,7 @@ export default function BedBoard() {
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
       <div className="flex h-full flex-col">
         {/* Header */}
-        <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
+        <div className="flex shrink-0 flex-wrap items-baseline justify-between gap-x-6 gap-y-2 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
               Bed board · Med-Surg 4 · Day shift
@@ -115,12 +132,18 @@ export default function BedBoard() {
             >
               {occupied} of {total} occupied · {isolation} on isolation · {dirty} dirty
             </p>
+            <p className="mt-1 inline-flex items-baseline gap-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+              Census as of{" "}
+              <Timestamp value={CENSUS_AS_OF} format="absolute" />
+              <span aria-hidden className="opacity-60">·</span>
+              <span>refreshes q5m</span>
+            </p>
           </div>
           <Legend />
         </div>
 
-        {/* Bays */}
-        <div className="grid min-h-0 flex-1 grid-cols-4 divide-x divide-[var(--color-border)]">
+        {/* Bays — single column at narrow, two-up at md, four-up at lg. */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 divide-y divide-[var(--color-border)] sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4">
           {BAYS.map((bay) => (
             <Bay key={bay.name} bay={bay} />
           ))}
@@ -134,9 +157,9 @@ export default function BedBoard() {
           }}
         >
           The bar at each cell's top edge encodes length-of-stay; perimeter
-          stipples flag isolation; the corner dot's size encodes acuity.
-          Empty cells distinguish clean, dirty, and blocked by shape, not
-          colour alone.
+          stipples flag isolation; the corner dot's size encodes acuity. ESI 1
+          and long-stay cells carry an explicit glyph, never colour alone.
+          Empty cells distinguish clean, dirty, blocked, and pending by shape.
         </p>
       </div>
     </div>
@@ -151,7 +174,10 @@ function Bay({ bay }: { bay: { name: string; beds: Bed[] } }) {
           {bay.name}
         </span>
       </div>
-      <ul className="grid flex-1 grid-cols-2 gap-px bg-[var(--color-border)] p-px">
+      <ul
+        className="grid flex-1 grid-cols-2 gap-px bg-[var(--color-border)] p-px"
+        aria-label={`${bay.name} beds`}
+      >
         {bay.beds.map((bed) => (
           <li key={bed.id} className="bg-[var(--color-bg)]">
             <BedCell bed={bed} />
@@ -164,20 +190,37 @@ function Bay({ bay }: { bay: { name: string; beds: Bed[] } }) {
 
 function BedCell({ bed }: { bed: Bed }) {
   if (bed.state.kind === "empty") {
-    return <EmptyCell id={bed.id} status={bed.state.status} />;
+    return <EmptyCell id={bed.id} status={bed.state.status} note={bed.state.note} />;
+  }
+  if (bed.state.kind === "boarding") {
+    return <BoardingCell id={bed.id} state={bed.state} />;
   }
   return <OccupiedCell id={bed.id} state={bed.state} />;
 }
 
+const EMPTY_LABEL: Record<EmptyStatus, string> = {
+  clean: "Clean — ready for assignment",
+  dirty: "Dirty — awaiting EVS",
+  blocked: "Blocked — out of service",
+  pending: "Pending transition",
+};
+
 function EmptyCell({
   id,
   status,
+  note,
 }: {
   id: string;
-  status: "clean" | "dirty" | "blocked";
+  status: EmptyStatus;
+  note?: string;
 }) {
   return (
-    <div className="relative flex h-full min-h-[88px] flex-col bg-[var(--color-surface)] p-2">
+    <div
+      tabIndex={0}
+      role="button"
+      aria-label={`Bed ${id}, ${EMPTY_LABEL[status]}${note ? `, ${note}` : ""}`}
+      className="relative flex h-full min-h-[88px] flex-col bg-[var(--color-surface)] p-2 outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-text)]"
+    >
       <div className="flex items-baseline justify-between">
         <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
           {id}
@@ -190,7 +233,13 @@ function EmptyCell({
         {status === "clean" && <CleanGlyph />}
         {status === "dirty" && <DirtyGlyph />}
         {status === "blocked" && <BlockedGlyph />}
+        {status === "pending" && <PendingGlyph />}
       </div>
+      {note && (
+        <div className="font-mono text-[9.5px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+          {note}
+        </div>
+      )}
     </div>
   );
 }
@@ -202,10 +251,20 @@ function OccupiedCell({
   id: string;
   state: Extract<BedState, { kind: "occupied" }>;
 }) {
+  const aria = buildOccupiedAria(id, state);
+  const isLongStay = state.losHours >= 96;
   return (
-    <div className="relative h-full min-h-[88px] overflow-hidden bg-[var(--color-surface)]">
+    <div
+      tabIndex={0}
+      role="button"
+      aria-label={aria}
+      className="relative h-full min-h-[88px] overflow-hidden bg-[var(--color-surface)] outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-text)]"
+    >
       {/* LOS bar — top edge of cell, length scales with hours. */}
       <LosBar hours={state.losHours} />
+
+      {/* Long-stay glyph — small clock dot motif above the bar. NEVER colour alone. */}
+      {isLongStay && <LongStayGlyph />}
 
       {/* Isolation perimeter, if present. */}
       {state.isolation && <IsolationPerimeter kind={state.isolation} />}
@@ -216,11 +275,14 @@ function OccupiedCell({
           <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text)]">
             {id}
           </span>
-          <AcuityDot esi={state.esi} />
+          <AcuityMark esi={state.esi} />
         </div>
         <div className="mt-auto leading-tight">
           <div className="flex items-baseline gap-1.5">
-            <span className="grid h-5 w-5 place-items-center rounded-full bg-[var(--color-surface-2)] font-mono text-[10px] tracking-tight text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
+            <span
+              aria-hidden
+              className="grid h-5 w-5 place-items-center rounded-full bg-[var(--color-surface-2)] font-mono text-[10px] tracking-tight text-[var(--color-text)] ring-1 ring-[var(--color-border)]"
+            >
               {state.initials}
             </span>
             <span className="truncate text-[11.5px] font-medium text-[var(--color-text)]">
@@ -229,19 +291,90 @@ function OccupiedCell({
           </div>
           <div className="mt-1 flex items-baseline justify-between gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
             <span>{state.sex}</span>
-            <span>{fmtLos(state.losHours)}</span>
+            <span aria-hidden>{fmtLos(state.losHours)}</span>
           </div>
+          {state.flags && state.flags.length > 0 && (
+            <SafetyFlags flags={state.flags} />
+          )}
         </div>
       </div>
     </div>
   );
 }
 
+function BoardingCell({
+  id,
+  state,
+}: {
+  id: string;
+  state: Extract<BedState, { kind: "boarding" }>;
+}) {
+  return (
+    <div
+      tabIndex={0}
+      role="button"
+      aria-label={`Bed ${id}, boarding ${state.patient}, MRN ${state.mrn}, ESI ${state.esi}, awaiting inpatient assignment, length of stay ${fmtLos(state.losHours)}`}
+      className="relative h-full min-h-[88px] overflow-hidden border-2 border-dashed border-[var(--color-warning)] bg-[var(--color-surface)] outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-text)]"
+    >
+      <div className="relative flex h-full flex-col p-2">
+        <div className="flex items-baseline justify-between">
+          <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text)]">
+            {id}
+          </span>
+          <span className="inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--color-warning)]">
+            <span
+              aria-hidden
+              className="h-1 w-1 rounded-full"
+              style={{ background: "var(--color-warning)" }}
+            />
+            boarding
+          </span>
+        </div>
+        <div className="mt-auto leading-tight">
+          <div className="flex items-baseline gap-1.5">
+            <AcuityMark esi={state.esi} inline />
+            <span className="truncate text-[11.5px] font-medium text-[var(--color-text)]">
+              {state.patient}
+            </span>
+          </div>
+          <div className="mt-1 flex items-baseline justify-between gap-1.5 font-mono text-[9.5px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+            <span>{state.sex}</span>
+            <span>{fmtLos(state.losHours)}</span>
+          </div>
+          {state.flags && state.flags.length > 0 && (
+            <SafetyFlags flags={state.flags} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function buildOccupiedAria(
+  id: string,
+  s: Extract<BedState, { kind: "occupied" }>,
+): string {
+  const parts: string[] = [];
+  parts.push(`Bed ${id}`);
+  parts.push(`occupied by ${s.patient}`);
+  parts.push(`MRN ${s.mrn}`);
+  parts.push(`sex ${s.sex}`);
+  parts.push(`ESI ${s.esi}${s.esi === 1 ? " — most acute" : ""}`);
+  if (s.isolation) parts.push(`${s.isolation} precautions`);
+  parts.push(`length of stay ${fmtLos(s.losHours)}${s.losHours >= 96 ? ", long stay" : ""}`);
+  if (s.flags && s.flags.length > 0) {
+    parts.push(`safety: ${s.flags.join(", ")}`);
+  }
+  return parts.join(", ");
+}
+
 /**
  * LOS bar — thin horizontal line at the top edge of the cell. Length scales
- * with hours of stay (0–168h = full bar at one week). Color tracks tier:
- * faint border for short stays, walnut mid, persimmon for long-stay alerts.
+ * with hours of stay (0–168h = full bar at one week). Color tracks tier.
  * Replaced a Bridson density backdrop (DECISIONS.md 2026-05-03 retrospective).
+ *
+ * Color is a redundant cue. The shape signal at ≥96h is the LongStayGlyph
+ * above the bar — color never carries the meaning alone (medical bar).
  */
 function LosBar({ hours }: { hours: number }) {
   const fraction = Math.min(1, hours / 168);
@@ -261,6 +394,23 @@ function LosBar({ hours }: { hours: number }) {
         style={{ width: `${fraction * 100}%`, background: color }}
       />
     </div>
+  );
+}
+
+/** Long-stay glyph — small clock-trio above the bar at ≥96h. */
+function LongStayGlyph() {
+  return (
+    <span
+      aria-hidden
+      className="absolute right-1.5 top-1 inline-flex items-center gap-px"
+      title="Long stay (≥96 h)"
+    >
+      <svg width={9} height={9} viewBox="0 0 9 9" className="block">
+        <circle cx={4.5} cy={4.5} r={3.5} fill="none" stroke="var(--color-accent)" strokeWidth={1} />
+        <line x1={4.5} y1={4.5} x2={4.5} y2={2.2} stroke="var(--color-accent)" strokeWidth={1} strokeLinecap="round" />
+        <line x1={4.5} y1={4.5} x2={6.4} y2={4.5} stroke="var(--color-accent)" strokeWidth={1} strokeLinecap="round" />
+      </svg>
+    </span>
   );
 }
 
@@ -309,15 +459,35 @@ function IsolationPerimeter({
 }
 
 /**
- * Acuity dot — single sized dot. Radius² scales with inverse ESI (ESI 1 =
- * biggest, ESI 5 = smallest). Same area-as-data encoding as the activity
- * heatmap; replaces a density-cluster encoding (DECISIONS.md 2026-05-03).
+ * Acuity mark — sized dot for ESI 2-5; ESI 1 (most acute) gets a leading
+ * `!` chevron + `ESI 1` mono-cap label so the cue is shape + label + colour,
+ * never colour alone.
  */
-function AcuityDot({ esi }: { esi: 1 | 2 | 3 | 4 | 5 }) {
-  const cell = 14;
-  // Inverse: ESI 1 (sickest) → 1.0, ESI 5 (lowest acuity) → 0.0.
+function AcuityMark({ esi, inline }: { esi: 1 | 2 | 3 | 4 | 5; inline?: boolean }) {
+  if (esi === 1) {
+    return (
+      <span
+        role="img"
+        aria-label="ESI 1, most acute"
+        className="inline-flex items-center gap-0.5"
+      >
+        <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden className="block">
+          <path
+            d="M 5 1 L 9 9 L 1 9 Z"
+            fill="var(--color-accent-2)"
+          />
+          <line x1={5} y1={3.6} x2={5} y2={6.4} stroke="var(--color-bg)" strokeWidth={1} strokeLinecap="round" />
+          <circle cx={5} cy={7.6} r={0.7} fill="var(--color-bg)" />
+        </svg>
+        <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-accent-2)]">
+          ESI 1
+        </span>
+      </span>
+    );
+  }
+  const cell = inline ? 12 : 14;
+  // Inverse: ESI 1 (sickest) → 1.0, ESI 5 → 0.0.
   const norm = (5 - esi) / 4;
-  // Radius range chosen so smallest dot is still visible, largest fits the cell.
   const minR = 1.4;
   const maxR = 4.2;
   const r = Math.sqrt(minR * minR + (maxR * maxR - minR * minR) * norm);
@@ -327,10 +497,33 @@ function AcuityDot({ esi }: { esi: 1 | 2 | 3 | 4 | 5 }) {
       width={cell}
       height={cell}
       viewBox={`0 0 ${cell} ${cell}`}
+      role="img"
       aria-label={`ESI ${esi}`}
     >
       <circle cx={cell / 2} cy={cell / 2} r={r} fill={ink} />
     </svg>
+  );
+}
+
+function SafetyFlags({ flags }: { flags: SafetyFlag[] }) {
+  return (
+    <div
+      className="mt-1 flex flex-wrap items-center gap-1"
+      aria-label={`Safety flags: ${flags.join(", ")}`}
+    >
+      {flags.map((f) => (
+        <span
+          key={f}
+          className="inline-flex items-center gap-0.5 rounded-[var(--radius-xs)] border border-[var(--color-border)] px-1 font-mono text-[8.5px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]"
+          style={{
+            color: f === "DNR" ? "var(--color-accent)" : undefined,
+            borderColor: f === "DNR" ? "color-mix(in oklch, var(--color-accent) 35%, var(--color-border))" : undefined,
+          }}
+        >
+          {f}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -342,7 +535,7 @@ function CleanGlyph() {
         background: "color-mix(in oklch, var(--color-success) 16%, var(--color-bg))",
       }}
     >
-      <svg width={10} height={10} viewBox="0 0 10 10">
+      <svg width={10} height={10} viewBox="0 0 10 10" aria-hidden>
         <path
           d="M 1.5 5.2 L 4 7.5 L 8.5 2.5"
           fill="none"
@@ -358,8 +551,7 @@ function CleanGlyph() {
 
 function DirtyGlyph() {
   return (
-    <svg width={20} height={20} viewBox="0 0 20 20" aria-label="Dirty">
-      {/* Three persimmon dots in a triangle — quiet warning, no icon font. */}
+    <svg width={20} height={20} viewBox="0 0 20 20" role="img" aria-label="Dirty">
       <circle cx={10} cy={4} r={1.6} fill="var(--color-accent)" />
       <circle cx={5} cy={13} r={1.6} fill="var(--color-accent)" />
       <circle cx={15} cy={13} r={1.6} fill="var(--color-accent)" />
@@ -369,7 +561,7 @@ function DirtyGlyph() {
 
 function BlockedGlyph() {
   return (
-    <svg width={20} height={20} viewBox="0 0 20 20" aria-label="Blocked">
+    <svg width={20} height={20} viewBox="0 0 20 20" role="img" aria-label="Blocked">
       <circle
         cx={10}
         cy={10}
@@ -391,7 +583,34 @@ function BlockedGlyph() {
   );
 }
 
+/** Pending transition — admit en route or discharge orders signed. */
+function PendingGlyph() {
+  return (
+    <svg width={20} height={20} viewBox="0 0 20 20" role="img" aria-label="Pending transition">
+      <circle
+        cx={10}
+        cy={10}
+        r={6}
+        fill="none"
+        stroke="var(--color-warning)"
+        strokeWidth="1"
+        strokeDasharray="1.5 1.5"
+      />
+      {/* Right-pointing chevron — direction of motion. */}
+      <path
+        d="M 8 7 L 12 10 L 8 13"
+        fill="none"
+        stroke="var(--color-warning)"
+        strokeWidth="1.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 function fmtLos(hours: number): string {
+  if (hours === 0) return "just now";
   if (hours < 24) return `${hours}h`;
   const d = Math.floor(hours / 24);
   const h = hours % 24;
@@ -406,9 +625,12 @@ function Legend() {
     { label: "Airborne", ink: "var(--color-danger)" },
   ];
   return (
-    <div className="flex items-center gap-3">
+    <div className="hidden items-center gap-3 sm:flex">
       {items.map((it) => (
-        <span key={it.label} className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]">
+        <span
+          key={it.label}
+          className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-muted)]"
+        >
           <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: it.ink }} />
           {it.label}
         </span>

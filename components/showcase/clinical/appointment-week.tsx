@@ -1,3 +1,5 @@
+import { Stethoscope, Video, Syringe } from "lucide-react";
+
 /**
  * Appointment week — outpatient scheduler. Seven columns (Mon–Sun), eleven
  * half-hour rows from 08:00 to 13:30. Appointment blocks sit on the grid;
@@ -13,6 +15,16 @@
  *    prefers length over density.
  *  - "Now" is a Federal Blue hairline crossing today's column.
  *
+ * 2026-05-05 medical-standard pass adds:
+ *  - Visit type carries an icon glyph (Stethoscope / Video / Syringe) inside
+ *    the block — color alone is a colourblind hazard.
+ *  - No-show + cancelled get an explicit mono-cap label and a strikethrough
+ *    rule across the patient name. Persimmon ink is paired with the label,
+ *    not used alone.
+ *  - Today column carries `aria-current="date"` and a leading dot before the
+ *    weekday label so the marker isn't colour-only.
+ *  - "Schedule as of 11:08" stale anchor in the header.
+ *
  * Pure server component. Mock schedule, no PHI.
  */
 
@@ -24,9 +36,12 @@ type Visit = {
   /** Duration in hours (0.5, 1.0, 1.5). */
   duration: number;
   patient: string;
+  mrn: string;
   reason: string;
   type: "in-person" | "telehealth" | "procedure";
-  status?: "tentative" | "confirmed" | "checked-in" | "no-show";
+  status?: "tentative" | "confirmed" | "checked-in" | "no-show" | "cancelled";
+  /** Severe / anaphylaxis allergy flag for at-a-glance scanning. */
+  severeAllergy?: boolean;
 };
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -38,21 +53,33 @@ const START_H = 8;
 const END_H = 13.5; // 13:30
 const HALF_HOURS = (END_H - START_H) * 2; // 11
 
+const TYPE_ICON = {
+  "in-person": Stethoscope,
+  telehealth: Video,
+  procedure: Syringe,
+} as const;
+
+const TYPE_TAG = {
+  "in-person": "IN",
+  telehealth: "TELE",
+  procedure: "PROC",
+} as const;
+
 const VISITS: Visit[] = [
-  { day: 0, start: 8.0, duration: 0.5, patient: "Garcia, M.", reason: "HTN recheck", type: "in-person", status: "checked-in" },
-  { day: 0, start: 9.0, duration: 0.5, patient: "Brown, A.", reason: "Annual physical", type: "in-person", status: "no-show" },
-  { day: 0, start: 10.0, duration: 1.0, patient: "Patel, R.", reason: "T2DM follow-up", type: "in-person", status: "confirmed" },
-  { day: 0, start: 12.0, duration: 0.5, patient: "Wong, T.", reason: "Med refill", type: "telehealth", status: "confirmed" },
-  { day: 1, start: 8.5, duration: 0.5, patient: "Lee, K.", reason: "Knee pain", type: "in-person", status: "tentative" },
-  { day: 1, start: 11.0, duration: 0.5, patient: "Davis, J.", reason: "URI", type: "telehealth", status: "confirmed" },
-  { day: 1, start: 13.0, duration: 0.5, patient: "Cohen, R.", reason: "Anxiety f/u", type: "telehealth", status: "confirmed" },
-  { day: 2, start: 9.0, duration: 1.5, patient: "Nguyen, L.", reason: "New patient", type: "in-person", status: "confirmed" },
-  { day: 2, start: 11.5, duration: 0.5, patient: "Hassan, F.", reason: "BP recheck", type: "in-person", status: "tentative" },
-  { day: 3, start: 10.0, duration: 0.5, patient: "Singh, P.", reason: "Cough", type: "in-person", status: "confirmed" },
-  { day: 3, start: 11.0, duration: 1.0, patient: "Park, J.", reason: "Joint injection", type: "procedure", status: "confirmed" },
-  { day: 4, start: 8.5, duration: 0.5, patient: "Romero, V.", reason: "Pap smear", type: "procedure", status: "tentative" },
-  { day: 4, start: 12.5, duration: 0.5, patient: "Chen, M.", reason: "Med review", type: "telehealth", status: "confirmed" },
-  { day: 5, start: 10.0, duration: 0.5, patient: "Adler, S.", reason: "Wellness", type: "in-person", status: "tentative" },
+  { day: 0, start: 8.0, duration: 0.5, patient: "Garcia, M.", mrn: "70184-2", reason: "HTN recheck", type: "in-person", status: "checked-in" },
+  { day: 0, start: 9.0, duration: 0.5, patient: "Brown, A.", mrn: "70219-4", reason: "Annual physical", type: "in-person", status: "no-show" },
+  { day: 0, start: 10.0, duration: 1.0, patient: "Patel, R.", mrn: "80124-5", reason: "T2DM follow-up", type: "in-person", status: "confirmed", severeAllergy: true },
+  { day: 0, start: 12.0, duration: 0.5, patient: "Wong, T.", mrn: "70302-1", reason: "Med refill", type: "telehealth", status: "confirmed" },
+  { day: 1, start: 8.5, duration: 0.5, patient: "Lee, K.", mrn: "70408-6", reason: "Knee pain", type: "in-person", status: "tentative" },
+  { day: 1, start: 11.0, duration: 0.5, patient: "Davis, J.", mrn: "70512-3", reason: "URI", type: "telehealth", status: "confirmed" },
+  { day: 1, start: 13.0, duration: 0.5, patient: "Cohen, R.", mrn: "70633-8", reason: "Anxiety f/u", type: "telehealth", status: "confirmed" },
+  { day: 2, start: 9.0, duration: 1.5, patient: "Nguyen, L.", mrn: "70747-2", reason: "New patient", type: "in-person", status: "confirmed" },
+  { day: 2, start: 11.5, duration: 0.5, patient: "Hassan, F.", mrn: "70808-9", reason: "BP recheck", type: "in-person", status: "tentative" },
+  { day: 3, start: 10.0, duration: 0.5, patient: "Singh, P.", mrn: "70915-4", reason: "Cough", type: "in-person", status: "confirmed" },
+  { day: 3, start: 11.0, duration: 1.0, patient: "Park, J.", mrn: "71012-7", reason: "Joint injection", type: "procedure", status: "confirmed", severeAllergy: true },
+  { day: 4, start: 8.5, duration: 0.5, patient: "Romero, V.", mrn: "71106-3", reason: "Pap smear", type: "procedure", status: "cancelled" },
+  { day: 4, start: 12.5, duration: 0.5, patient: "Chen, M.", mrn: "71211-5", reason: "Med review", type: "telehealth", status: "confirmed" },
+  { day: 5, start: 10.0, duration: 0.5, patient: "Adler, S.", mrn: "71309-6", reason: "Wellness", type: "in-person", status: "tentative" },
 ];
 
 export default function AppointmentWeek() {
@@ -64,7 +91,7 @@ export default function AppointmentWeek() {
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
       <div className="flex h-full flex-col">
         {/* Header */}
-        <div className="flex shrink-0 items-baseline justify-between border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
+        <div className="flex shrink-0 flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-surface-2)] px-6 py-3">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
               Schedule · Hartman, K., MD · Wk 18
@@ -80,8 +107,35 @@ export default function AppointmentWeek() {
             <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
               May 04 — May 10
             </div>
-            <div className="mt-1 font-mono text-[11px] text-[var(--color-text)]">11:08</div>
+            <div
+              className="mt-1 font-mono text-[11px] tabular-nums text-[var(--color-text)]"
+              role="status"
+              aria-live="polite"
+              aria-label="Schedule as of 11:08, morning clinic"
+            >
+              <span className="mr-1.5 text-[var(--color-text-muted)]">as of</span>
+              11:08
+            </div>
           </div>
+        </div>
+
+        {/* Type legend strip — every visual encoding needs a key. */}
+        <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-[var(--color-border)] bg-[var(--color-bg)] px-6 py-1.5">
+          <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-[var(--color-text-muted)]">
+            Legend
+          </span>
+          <LegendChip type="in-person" label="In person" />
+          <LegendChip type="telehealth" label="Telehealth" />
+          <LegendChip type="procedure" label="Procedure" />
+          <span aria-hidden className="h-3 w-px bg-[var(--color-border)]" />
+          <span className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+            <span aria-hidden className="block h-2 w-px bg-[var(--color-accent-2)]" />
+            Now line
+          </span>
+          <span className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--color-accent)]">
+            <span aria-hidden className="block h-1.5 w-1.5 rotate-45 bg-[var(--color-accent)]" />
+            Severe allergy
+          </span>
         </div>
 
         {/* Grid */}
@@ -96,11 +150,35 @@ export default function AppointmentWeek() {
             fontVariationSettings: '"opsz" 18, "SOFT" 30',
           }}
         >
-          Block height encodes duration; left-edge ink encodes visit type.
+          Block height encodes duration; left-edge ink + glyph encode visit type.
           Federal Blue hairline crosses today's column at the present minute.
+          Morning clinic (08:00–13:30 shown).
         </p>
       </div>
     </div>
+  );
+}
+
+function LegendChip({
+  type,
+  label,
+}: {
+  type: Visit["type"];
+  label: string;
+}) {
+  const Icon = TYPE_ICON[type];
+  const ink =
+    type === "procedure"
+      ? "var(--color-accent)"
+      : type === "telehealth"
+        ? "var(--color-accent-2)"
+        : "var(--color-text)";
+  return (
+    <span className="inline-flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+      <span aria-hidden className="block h-2 w-[2px]" style={{ background: ink }} />
+      <Icon size={10} strokeWidth={1.6} aria-hidden style={{ color: ink }} />
+      {label}
+    </span>
   );
 }
 
@@ -111,35 +189,44 @@ const ROW_H = 24;
 function Grid() {
   const rows = HALF_HOURS;
   const totalH = HEADER_H + rows * ROW_H;
-  // Build SVG that fills the available width — flex parent will size it.
-  const COLS = 7;
-  const colW = `calc((100% - ${TIME_GUTTER}px) / ${COLS})`;
 
   return (
     <div
+      role="grid"
+      aria-label="Weekly appointment grid, Monday through Sunday, 08:00 to 13:30"
+      aria-rowcount={rows + 1}
+      aria-colcount={8}
       className="relative h-full w-full overflow-hidden"
       style={{ minHeight: totalH }}
     >
       {/* Day-header row */}
       <div
+        role="row"
         className="grid grid-cols-[56px_repeat(7,1fr)] border-b border-[var(--color-border)] bg-[var(--color-surface)]"
         style={{ height: HEADER_H }}
       >
-        <div />
+        <div role="columnheader" />
         {DAY_LABELS.map((d, i) => {
           const isToday = i === TODAY;
           return (
             <div
               key={d}
-              className={
-                "flex items-center justify-center border-l border-[var(--color-border)] font-mono text-[10px] uppercase tracking-[0.18em]"
-              }
+              role="columnheader"
+              aria-current={isToday ? "date" : undefined}
+              className="flex items-center justify-center gap-1.5 border-l border-[var(--color-border)] font-mono text-[10px] uppercase tracking-[0.18em]"
               style={{
                 color: isToday ? "var(--color-accent-2)" : "var(--color-text-muted)",
               }}
             >
+              {isToday && (
+                <span
+                  aria-hidden
+                  className="block h-1 w-1 rounded-full"
+                  style={{ background: "var(--color-accent-2)" }}
+                />
+              )}
               <span>{d}</span>
-              <span className="ml-1.5 text-[var(--color-text-muted)]">{DAY_DATES[i]}</span>
+              <span className="ml-0.5 text-[var(--color-text-muted)]">{DAY_DATES[i]}</span>
             </div>
           );
         })}
@@ -153,22 +240,24 @@ function Grid() {
           return (
             <div
               key={r}
+              role="row"
               className={
                 "grid grid-cols-[56px_repeat(7,1fr)] " +
                 (onHour ? "border-b border-[var(--color-border)]" : "")
               }
               style={{ height: ROW_H }}
             >
-              <div className="flex items-start justify-end pr-2 pt-1 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]">
+              <div
+                role="rowheader"
+                className="flex items-start justify-end pr-2 pt-1 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-muted)]"
+              >
                 {onHour && fmtH(t)}
               </div>
               {Array.from({ length: 7 }).map((__, d) => (
                 <div
                   key={d}
+                  role="gridcell"
                   className="border-l border-[var(--color-border)]"
-                  style={{
-                    background: onHour ? "transparent" : undefined,
-                  }}
                 />
               ))}
             </div>
@@ -222,15 +311,30 @@ function NowHairline() {
 function AppointmentBlock({ v }: { v: Visit }) {
   const top = ((v.start - START_H) / 0.5) * ROW_H + 1;
   const height = (v.duration / 0.5) * ROW_H - 2;
+  const isCancelled = v.status === "cancelled";
+  const isNoShow = v.status === "no-show";
+  const isTentative = v.status === "tentative";
+  const Icon = TYPE_ICON[v.type];
+  const tag = TYPE_TAG[v.type];
+
   const ink =
-    v.status === "no-show"
+    isNoShow || isCancelled
       ? "var(--color-border-strong)"
       : v.type === "procedure"
         ? "var(--color-accent)"
         : v.type === "telehealth"
           ? "var(--color-accent-2)"
           : "var(--color-text)";
-  const dim = v.status === "no-show" || v.status === "tentative";
+  const dim = isNoShow || isTentative || isCancelled;
+  const ariaLabel = [
+    `${fmtH(v.start)} ${v.duration * 60} minute ${v.type} appointment`,
+    `${v.patient}, MRN ${v.mrn}`,
+    v.reason,
+    v.status ?? "scheduled",
+    v.severeAllergy ? "severe allergy on file" : "",
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   return (
     <div
@@ -241,44 +345,70 @@ function AppointmentBlock({ v }: { v: Visit }) {
       {Array.from({ length: 7 }).map((_, d) => {
         if (d !== v.day) return <div key={d} />;
         return (
-          <div
+          <button
             key={d}
-            className="relative mx-0.5 overflow-hidden border-l-2"
+            type="button"
+            aria-label={ariaLabel}
+            className="relative mx-0.5 overflow-hidden border-l-2 text-left transition-[border-color,background] duration-[120ms] ease-out hover:border-l-[3px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent-2)]"
             style={{
               borderLeftColor: ink,
-              background: dim
-                ? "var(--color-bg)"
-                : "var(--color-surface)",
-              opacity: v.status === "no-show" ? 0.55 : 1,
+              background: dim ? "var(--color-bg)" : "var(--color-surface)",
+              opacity: isNoShow || isCancelled ? 0.7 : 1,
               pointerEvents: "auto",
             }}
           >
-            <div className="flex items-center justify-between border-b border-[var(--color-border)] px-1.5 py-0.5">
+            <div className="flex items-center justify-between gap-1 border-b border-[var(--color-border)] px-1.5 py-0.5">
               <span
-                className="truncate font-mono text-[9px] uppercase tracking-[0.14em]"
+                className="inline-flex items-center gap-1 truncate font-mono text-[9px] uppercase tracking-[0.14em]"
                 style={{ color: ink }}
               >
+                <Icon size={9} strokeWidth={1.8} aria-hidden />
                 {fmtH(v.start)}
+              </span>
+              <span
+                aria-hidden
+                className="font-mono text-[8.5px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]"
+              >
+                {tag}
               </span>
             </div>
             <div className="px-1.5 py-1 leading-tight">
-              <div
-                className={
-                  dim
-                    ? "truncate text-[10.5px] text-[var(--color-text-muted)]"
-                    : "truncate text-[10.5px] font-medium text-[var(--color-text)]"
-                }
-              >
-                {v.patient}
+              <div className="flex items-center gap-1">
+                {v.severeAllergy && (
+                  <span
+                    aria-hidden
+                    className="block h-1.5 w-1.5 rotate-45 shrink-0"
+                    style={{ background: "var(--color-accent)" }}
+                    title="Severe allergy on file"
+                  />
+                )}
+                <div
+                  className={
+                    "truncate text-[10.5px] " +
+                    (dim
+                      ? "text-[var(--color-text-muted)]"
+                      : "font-medium text-[var(--color-text)]") +
+                    (isNoShow || isCancelled ? " line-through" : "")
+                  }
+                >
+                  {v.patient}
+                </div>
               </div>
               <div className="truncate text-[9.5px] text-[var(--color-text-muted)]">
                 {v.reason}
               </div>
+              {(isNoShow || isCancelled) && (
+                <div
+                  className="mt-0.5 font-mono text-[8.5px] uppercase tracking-[0.22em]"
+                  style={{ color: "var(--color-accent)" }}
+                >
+                  {isNoShow ? "no-show" : "cancelled"}
+                </div>
+              )}
             </div>
-          </div>
+          </button>
         );
       })}
     </div>
   );
 }
-

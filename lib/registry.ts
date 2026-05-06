@@ -415,6 +415,48 @@ export const REGISTRY: ComponentEntry[] = [
     firstImpression: "2026-05-03",
     load: () => import("@/components/showcase/empty-states/no-encounters-yet"),
   },
+  {
+    domain: "medical",
+    category: "clinical",
+    slug: "mar",
+    title: "Medication administration record",
+    filename: "mar.tsx",
+    description:
+      "Nurse's working surface: rows are meds, columns are 2-hour time slots. Each cell is given/scheduled/missed/held/PRN. Keyboard arrow nav across the grid; Enter on a scheduled cell opens chart-this-dose.",
+    layout: "specimen",
+    aspectRatio: "16 / 10",
+    maxWidth: 1100,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/clinical/mar"),
+  },
+  {
+    domain: "medical",
+    category: "dashboards",
+    slug: "critical-alerts",
+    title: "Critical alerts",
+    filename: "critical-alerts.tsx",
+    description:
+      "Cross-patient feed of unread abnormal results. Severity icon + value + range + patient + time-since-resulted + acknowledge. J/K nav, click opens result detail with prior-values trend.",
+    layout: "specimen",
+    aspectRatio: "5 / 6",
+    maxWidth: 720,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/dashboards/critical-alerts"),
+  },
+  {
+    domain: "medical",
+    category: "clinical",
+    slug: "problem-list",
+    title: "Problem list",
+    filename: "problem-list.tsx",
+    description:
+      "Patient-level longitudinal index of active problems with status, ICD-10 code, onset, last-updated, responsible clinician, severity. Click a problem to open a side panel with related events.",
+    layout: "specimen",
+    aspectRatio: "5 / 6",
+    maxWidth: 700,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/clinical/problem-list"),
+  },
 ];
 
 export type CategoryGroup = {

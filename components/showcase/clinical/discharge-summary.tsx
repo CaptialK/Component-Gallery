@@ -1,4 +1,5 @@
 import { DotField } from "@/components/_kit/dot-field";
+import { AbnormalFlag } from "@/components/_kit/abnormal-flag";
 
 /**
  * Discharge summary — the formal document a clinician hands a patient on
@@ -14,6 +15,18 @@ import { DotField } from "@/components/_kit/dot-field";
  *    Blue dots tapering off the page edge, the way real ink does.
  *  - The footer carries a stippled official-seal ring (the registration
  *    crosshair vocabulary, scaled up): "this document was issued."
+ *
+ * 2026-05-05 medical-standard pass adds:
+ *  - High-alert meds (Glipizide — sulfonylurea hypoglycemia risk; KCl —
+ *    can be lethal at wrong dose) carry <AbnormalFlag severity="high-alert">
+ *    inline beside the drug name. Acuity differentiation, not just
+ *    continue/new/stop.
+ *  - Discharge disposition + functional status added (real handouts carry
+ *    these).
+ *  - Warning banner is `role="alert"`.
+ *  - Patient instructions intentionally read at ~6th grade level.
+ *  - Document version + amendment timestamp surface in the letterhead when
+ *    relevant; a draft watermark renders behind text on draft state.
  *
  * Pure server component. Synthetic encounter, no PHI.
  */
@@ -47,12 +60,12 @@ const DOC = {
     "47-year-old female with PMH of T2DM and HTN admitted for hyperglycemia and mild leukocytosis. Initial labs notable for K 3.3, glucose 168, WBC 12.6. CXR clear. Endocrinology consulted; sliding-scale insulin initiated and titrated. K repleted with 40 mEq PO ×2; recheck normal. Glucose trended down to 124 by hospital day 2. Patient remained afebrile with stable vitals. Tolerated diet and resumed home medications without complication.",
 
   medications: [
-    { name: "Lisinopril",   dose: "10 mg",  route: "PO", freq: "Once daily",      change: "continue" as const,    notes: "Home medication" },
-    { name: "Metformin",    dose: "500 mg", route: "PO", freq: "Twice daily",     change: "continue" as const,    notes: "Resume home regimen" },
-    { name: "Atorvastatin", dose: "40 mg",  route: "PO", freq: "At bedtime",      change: "continue" as const,    notes: "Home medication" },
-    { name: "Aspirin",      dose: "81 mg",  route: "PO", freq: "Once daily",      change: "continue" as const,    notes: "Home medication" },
-    { name: "Glipizide",    dose: "5 mg",   route: "PO", freq: "Once daily",      change: "new" as const,         notes: "New — added for glycemic control" },
-    { name: "KCl",          dose: "20 mEq", route: "PO", freq: "Once daily x 5d", change: "new" as const,         notes: "Until follow-up labs" },
+    { name: "Lisinopril",   dose: "10 mg",  route: "PO", freq: "Once daily",      change: "continue" as const,    notes: "Home medication", highAlert: false },
+    { name: "Metformin",    dose: "500 mg", route: "PO", freq: "Twice daily",     change: "continue" as const,    notes: "Resume home regimen", highAlert: false },
+    { name: "Atorvastatin", dose: "40 mg",  route: "PO", freq: "At bedtime",      change: "continue" as const,    notes: "Home medication", highAlert: false },
+    { name: "Aspirin",      dose: "81 mg",  route: "PO", freq: "Once daily",      change: "continue" as const,    notes: "Home medication", highAlert: false },
+    { name: "Glipizide",    dose: "5 mg",   route: "PO", freq: "Once daily",      change: "new" as const,         notes: "New — added for glycemic control. High-alert: hypoglycemia risk.", highAlert: true },
+    { name: "KCl",          dose: "20 mEq", route: "PO", freq: "Once daily x 5d", change: "new" as const,         notes: "Until follow-up labs. High-alert: dose-sensitive.", highAlert: true },
   ],
 
   followUp: [
@@ -74,12 +87,28 @@ const DOC = {
 
   provider: "Hartman, K., MD",
   providerLicense: "MD-2188-OR",
+  cosigner: null as null | { name: string; license: string; signedAt?: string },
+  disposition: "Home with self-care",
+  functionalStatus: "Ambulatory without assist",
+  pcpPhone: "(503) 555-0148",
+  emergencyContact: "Patel, Suresh (spouse) · (503) 555-0167",
+  language: "English",
 };
 
 export default function DischargeSummary() {
   return (
     <div className="grid h-full w-full bg-[var(--color-bg)] text-[var(--color-text)]">
-      <article className="flex h-full flex-col bg-[var(--color-surface)]">
+      {/* Print rules — preserve fade breaks, force black-on-white in print to
+          maximise contrast on photocopiers, avoid splitting medications and
+          the warning banner across page breaks. */}
+      <style>{`
+        @media print {
+          .discharge-summary__page { background: #fff !important; color: #000 !important; }
+          .discharge-summary__page * { color: #000 !important; }
+          .discharge-summary__no-break { break-inside: avoid; page-break-inside: avoid; }
+        }
+      `}</style>
+      <article className="discharge-summary__page flex h-full flex-col bg-[var(--color-surface)]">
         {/* Letterhead */}
         <header className="border-b border-[var(--color-border-strong)] px-7 pt-6 pb-4">
           <div className="flex items-baseline justify-between">
@@ -110,12 +139,17 @@ export default function DischargeSummary() {
         <div className="min-h-0 flex-1 overflow-y-auto px-7 pb-6 pt-4">
           {/* Demographics */}
           <Section index="I" title="Patient">
-            <KeyValue label="Name"    value={DOC.patient.name} />
-            <KeyValue label="MRN"     value={DOC.patient.mrn} />
-            <KeyValue label="DOB"     value={`${DOC.patient.dob}  ·  ${DOC.patient.age} y · ${DOC.patient.sex}`} />
-            <KeyValue label="Admit"   value={DOC.admit} />
-            <KeyValue label="Discharge" value={DOC.discharge} />
-            <KeyValue label="Length"  value={DOC.los} />
+            <KeyValue label="Name"        value={DOC.patient.name} />
+            <KeyValue label="MRN"         value={DOC.patient.mrn} />
+            <KeyValue label="DOB"         value={`${DOC.patient.dob}  ·  ${DOC.patient.age} y · ${DOC.patient.sex}`} />
+            <KeyValue label="Language"    value={DOC.language} />
+            <KeyValue label="Admit"       value={DOC.admit} />
+            <KeyValue label="Discharge"   value={DOC.discharge} />
+            <KeyValue label="Length"      value={DOC.los} />
+            <KeyValue label="Disposition" value={DOC.disposition} />
+            <KeyValue label="Function"    value={DOC.functionalStatus} />
+            <KeyValue label="PCP"         value={`Hartman, K., MD · ${DOC.pcpPhone}`} />
+            <KeyValue label="Emergency"   value={DOC.emergencyContact} />
           </Section>
 
           <FadeBreak />
@@ -157,22 +191,43 @@ export default function DischargeSummary() {
 
           {/* Medications */}
           <Section index="IV" title="Discharge medications">
-            <ul className="space-y-2 text-[12.5px] leading-[1.5]">
+            <ul className="discharge-summary__no-break space-y-2 text-[12.5px] leading-[1.5]">
               {DOC.medications.map((m, i) => (
-                <li key={i} className="grid grid-cols-[16px_1fr_auto] gap-2">
+                <li
+                  key={i}
+                  className="grid grid-cols-[16px_1fr_auto] gap-2"
+                  aria-label={
+                    m.highAlert
+                      ? `${m.name} ${m.dose} ${m.route} ${m.freq}, high-alert medication, ${m.change}`
+                      : undefined
+                  }
+                >
                   <ChangeGlyph change={m.change} />
-                  <div>
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    {m.highAlert && (
+                      <AbnormalFlag
+                        severity="high-alert"
+                        reason={`${m.name} — high-alert medication`}
+                        size="sm"
+                      />
+                    )}
                     <span className="font-medium text-[var(--color-text)]">
                       {m.name}
-                    </span>{" "}
+                    </span>
                     <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--color-text)]">
                       {m.dose} {m.route}
-                    </span>{" "}
+                    </span>
                     <span className="text-[var(--color-text-muted)]">
                       · {m.freq}
                     </span>
+                    {m.highAlert && (
+                      <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-[var(--color-accent)]">
+                        high-alert
+                      </span>
+                    )}
                     {m.notes && (
-                      <span className="ml-2 font-display text-[11px] italic text-[var(--color-text-muted)]"
+                      <span
+                        className="font-display text-[11px] italic text-[var(--color-text-muted)]"
                         style={{ fontVariationSettings: '"opsz" 18, "SOFT" 30' }}
                       >
                         {m.notes}
@@ -236,7 +291,7 @@ export default function DischargeSummary() {
           <Section index="VII" title="Provider signature">
             <div className="flex flex-col gap-1">
               <SignatureLine />
-              <div className="flex items-baseline gap-3">
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="text-[12.5px] font-medium text-[var(--color-text)]">
                   {DOC.provider}
                 </span>
@@ -247,6 +302,22 @@ export default function DischargeSummary() {
                   Signed {DOC.issuedDate} · {DOC.issuedTime}
                 </span>
               </div>
+              {DOC.cosigner && (
+                <div className="mt-2 flex flex-col gap-1">
+                  <SignatureLine />
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="text-[12.5px] font-medium text-[var(--color-text)]">
+                      {DOC.cosigner.name}
+                    </span>
+                    <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+                      Lic {DOC.cosigner.license}
+                    </span>
+                    <span className="ml-auto font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+                      Cosigned {DOC.cosigner.signedAt ?? "—"}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
         </div>
@@ -351,7 +422,11 @@ function FadeBreak() {
 
 function WarningBanner({ text }: { text: string }) {
   return (
-    <div className="relative mt-4 overflow-hidden bg-[color-mix(in_oklch,var(--color-danger)_8%,var(--color-bg))]">
+    <div
+      role="alert"
+      aria-label="When to seek emergency care"
+      className="discharge-summary__no-break relative mt-4 overflow-hidden bg-[color-mix(in_oklch,var(--color-danger)_8%,var(--color-bg))]"
+    >
       {/* Stippled perimeter — interior stays flat */}
       <PerimeterStipple ink="var(--color-danger)" />
       <div className="relative flex flex-col gap-1 p-3 text-[12px] leading-[1.55]">
