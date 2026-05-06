@@ -2,25 +2,22 @@
 
 import { useMemo, useState } from "react";
 import { Search, X, Plus, Check } from "lucide-react";
-import { mulberry32, poissonDisc } from "@/components/_kit/dot-noise";
 
 /**
  * Order entry — CPOE search-as-you-type. Type a symptom or test name; the
  * suggestions filter in place, grouped by category. Each suggestion carries
- * a stippled "frequency in your panel" indicator: density-as-frequency
- * tells the clinician at a glance whether they're picking from familiar
- * orders or reaching for something rare.
+ * a frequency-in-your-panel bar: length tells the clinician at a glance
+ * whether they're picking from familiar orders or reaching for something rare.
  *
  * Dot-language commitments specific to this plate:
  *
- *  - The frequency indicator is a fixed-width Bridson stipple whose
- *    coverage maps to a logged-frequency rank (≥1×/wk → top of canon,
- *    ≤1×/yr → near floor). Cleveland-McGill says length wins for ratio,
- *    but rank is ordinal here; density carries the rank fine.
- *  - The "Your most-ordered" shortcut group at top of an empty search
- *    gets Federal Blue inked dots, distinguishing recall from search.
- *  - The Cart rail shows queued orders; each carries a small stipple
- *    encoding cost-rank (1 dot = $, 4 dots = $$$$). Rank, not value.
+ *  - The frequency indicator is a thin length bar (≥1×/wk fills it; ≤1×/yr
+ *    is a stub). Refactored 2026-05-03 from a Bridson density stipple — the
+ *    dot+line system pass moved quantitative encoding from density to length
+ *    per Cleveland-McGill. Federal Blue tint above the recall threshold
+ *    (freq > 0.7) so frequent picks read as "your panel."
+ *  - Cost-rank is four discrete dots filled left-to-right (1 = $, 4 = $$$$).
+ *    Rank, not value; dots-as-marks per the system primitives.
  *
  * Client component (search query state). Mock catalog only.
  */
@@ -152,7 +149,7 @@ export default function OrderEntry() {
                         key={o.id}
                         className="flex items-center gap-3 border-b border-[var(--color-border)] px-6 py-2 hover:bg-[var(--color-surface)]"
                       >
-                        <FrequencyStipple freq={o.freq} seed={o.id.charCodeAt(0) * 31 + o.id.length} />
+                        <FrequencyBar freq={o.freq} />
                         <div className="min-w-0 flex-1">
                           <div className="flex items-baseline gap-2">
                             <span className="truncate text-[13px] font-medium text-[var(--color-text)]">
@@ -296,29 +293,17 @@ function highlight(text: string, q: string): React.ReactNode {
   );
 }
 
-function FrequencyStipple({ freq, seed }: { freq: number; seed: number }) {
-  const W = 38;
-  const H = 14;
-  const points = poissonDisc({ width: W, height: H, radius: 2.4, seed });
-  const rng = mulberry32(seed + 11);
-  // freq 0..1 → keep_prob 0.18..1 (canon-bounded coverage).
-  const keep = 0.18 + freq * 0.8;
+function FrequencyBar({ freq }: { freq: number }) {
   const ink = freq > 0.7 ? "var(--color-accent-2)" : "var(--color-text)";
-
   return (
-    <div className="shrink-0">
-      <svg
-        width={W}
-        height={H}
-        viewBox={`0 0 ${W} ${H}`}
-        aria-label={`${Math.round(freq * 100)}% frequency rank`}
-        className="block"
-      >
-        {points.map((p, i) => {
-          if (rng() > keep) return null;
-          return <circle key={i} cx={p.x} cy={p.y} r={0.85} fill={ink} opacity={0.7} />;
-        })}
-      </svg>
+    <div
+      className="h-[2px] w-9 shrink-0 bg-[var(--color-border)]"
+      aria-label={`${Math.round(freq * 100)}% frequency rank`}
+    >
+      <div
+        className="h-full"
+        style={{ width: `${Math.max(0, Math.min(1, freq)) * 100}%`, background: ink, opacity: 0.85 }}
+      />
     </div>
   );
 }

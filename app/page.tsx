@@ -4,22 +4,28 @@ import { SiteHeader } from "@/components/_kit/site-header";
 import { SiteFooter } from "@/components/_kit/site-footer";
 import { DotField } from "@/components/_kit/dot-field";
 import { Skeleton } from "@/components/_kit/skeleton";
-import { groupByCategory, type ComponentEntry } from "@/lib/registry";
+import {
+  groupByDomain,
+  getDomainLabel,
+  type CategoryGroup,
+  type ComponentEntry,
+  type Domain,
+} from "@/lib/registry";
 
 export default function HomePage() {
-  const groups = groupByCategory();
+  const domains = groupByDomain();
 
   return (
     <>
       <SiteHeader />
       <main className="mx-auto w-full max-w-[1100px] px-4 md:px-6">
         <Hero />
-        <div className="space-y-16 pb-12">
-          {groups.map((g) => (
-            <CategorySection
-              key={g.category}
-              category={g.category}
-              entries={g.entries}
+        <div className="space-y-20 pb-16">
+          {domains.map((d) => (
+            <DomainSection
+              key={d.domain}
+              domain={d.domain}
+              groups={d.groups}
             />
           ))}
         </div>
@@ -79,6 +85,40 @@ function Hero() {
   );
 }
 
+function DomainSection({
+  domain,
+  groups,
+}: {
+  domain: Domain;
+  groups: CategoryGroup[];
+}) {
+  const totalPlates = groups.reduce((s, g) => s + g.entries.length, 0);
+  return (
+    <section id={domain} className="scroll-mt-20">
+      <header className="flex items-baseline justify-between border-b border-[var(--color-border-strong)] pb-3">
+        <h2
+          className="font-display text-[28px] italic leading-none tracking-[-0.02em] text-[var(--color-text)] md:text-[32px]"
+          style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
+        >
+          {getDomainLabel(domain)}
+        </h2>
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-muted)]">
+          {totalPlates} plate{totalPlates === 1 ? "" : "s"}
+        </span>
+      </header>
+      <div className="mt-10 space-y-12">
+        {groups.map((g) => (
+          <CategorySection
+            key={g.category}
+            category={g.category}
+            entries={g.entries}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function CategorySection({
   category,
   entries,
@@ -89,12 +129,12 @@ function CategorySection({
   return (
     <section id={category} className="scroll-mt-20">
       <header className="flex items-baseline justify-between border-b border-[var(--color-border)] pb-2">
-        <h2 className="text-lg font-medium tracking-[-0.02em]">
+        <h3 className="text-[15px] font-medium tracking-[-0.01em]">
           <span className="capitalize">{category.replace(/-/g, " ")}</span>
           <span className="ml-2 font-mono text-xs text-[var(--color-text-muted)]">
             · {entries.length} file{entries.length === 1 ? "" : "s"}
           </span>
-        </h2>
+        </h3>
         <span className="font-mono text-xs text-[var(--color-text-muted)]">
           /{category}
         </span>

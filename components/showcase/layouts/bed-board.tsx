@@ -304,21 +304,6 @@ function IsolationPerimeter({
       {dots.map((p, i) => (
         <circle key={i} cx={p.x} cy={p.y} r={0.9} fill={ink} opacity={0.95} />
       ))}
-      {/* Mono caps tag in the bottom-right corner — analytical readout. */}
-      <text
-        x={W - inset - 1}
-        y={H - inset - 4}
-        textAnchor="end"
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 5.5,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-          fill: ink,
-        }}
-      >
-        {kind}
-      </text>
     </svg>
   );
 }

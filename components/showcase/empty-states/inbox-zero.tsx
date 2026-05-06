@@ -10,7 +10,10 @@ export default function InboxZero() {
         {/* Pointillism illustration: an empty envelope/tray, two-tone, varying density */}
         <Illustration />
 
-        <h2 className="mt-8 text-[22px] font-medium leading-tight tracking-[-0.02em]">
+        <h2
+          className="mt-8 font-display text-[28px] leading-tight tracking-[-0.022em] text-[var(--color-text)]"
+          style={{ fontVariationSettings: '"opsz" 48, "SOFT" 30' }}
+        >
           Inbox zero.
         </h2>
         <p className="mt-2 max-w-[34ch] text-sm text-[var(--color-text-muted)]">

@@ -11,21 +11,33 @@ export default function CenteredSignin() {
   return (
     <div className="grid h-full w-full place-items-center bg-[var(--color-bg)] px-4 py-10">
       <div className="w-full max-w-[380px]">
-        {/* Wordmark — small, restrained */}
+        {/* Wordmark — small, restrained. Matches app-shell brand mark. */}
         <div className="mb-10 flex items-center gap-2">
-          <div
+          <span
             aria-hidden
-            className="grid h-7 w-7 place-items-center rounded-[var(--radius-xs)] bg-[var(--color-accent)] font-mono text-[12px] font-medium text-[var(--color-accent-fg)]"
+            className="grid h-7 w-7 place-items-center rounded-[var(--radius-xs)] bg-[var(--color-bg)] ring-1 ring-[var(--color-border-strong)]"
           >
-            S
-          </div>
-          <span className="font-mono text-[13px] tracking-tight text-[var(--color-text)]">
-            stipple.lab
+            <span
+              className="font-display text-[16px] italic leading-none text-[var(--color-text)]"
+              style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+            >
+              S
+            </span>
+          </span>
+          <span
+            className="font-display text-[15px] italic leading-none text-[var(--color-text)]"
+            style={{ fontVariationSettings: '"opsz" 24, "SOFT" 30' }}
+          >
+            stipple
+            <span className="text-[var(--color-text-muted)]">.lab</span>
           </span>
         </div>
 
-        <h1 className="text-[22px] font-medium leading-tight tracking-[-0.02em]">
-          Sign in to continue
+        <h1
+          className="font-display text-[26px] leading-tight tracking-[-0.022em] text-[var(--color-text)]"
+          style={{ fontVariationSettings: '"opsz" 36, "SOFT" 30' }}
+        >
+          Sign in to continue.
         </h1>
         <p className="mt-1.5 text-xs text-[var(--color-text-muted)]">
           New here?{" "}
