@@ -87,9 +87,9 @@ Plate numbers are registry array position, 1-indexed, three-digit ("№ 002"). T
 
 Display labels for category slugs live in `lib/registry.ts` (`CATEGORY_LABELS` map). Add a new category? Add the slug → label entry there or `getCategoryLabel` falls back to the kebab-case slug.
 
-## Plates currently shipped (29)
+## Plates currently shipped (32)
 
-**SaaS — 13 plates** (in registry order):
+**SaaS — 16 plates** (in registry order):
 
 1. № 001 `layouts/app-shell` — Sidebar + topbar + content; the chrome itself is the showcase. NAV navigates via hash routing; bell opens a popover; avatar opens a menu. Status legend + ringed-monogram avatars + accent-strip row hover.
 2. № 002 `auth/centered-signin` — The original Spike 2 specimen test plate. Now wires real form validation + per-field error display. Brand mark = Fraunces italic ringed badge.
@@ -104,8 +104,11 @@ Display labels for category slugs live in `lib/registry.ts` (`CATEGORY_LABELS` m
 11. № 011 `dashboards/feature-flags` — Two-pane master-detail console: flag list left, focused-flag detail right with env matrix, rollout slider, evaluation-volume Trace, and audit log.
 12. № 012 `dashboards/api-rate-limits` — Per-endpoint observability surface — quota gauge, per-second histogram, p95 latency, status chip; hover surfaces detail; status chip toggles throttled state.
 13. № 013 `forms/api-keys` — Vertical credential cards; ringed creator monogram, recency trail, scope chips, large masked secret, 7d sparkline, danger-zone rotate/revoke with confirm-by-typing.
+14. № 014 `dashboards/data-table` — The canonical SaaS data table. Spreadsheet-density customer ledger with sticky head + first column, sortable columns (dot+tick glyph), multi-row selection with indeterminate state, bulk-action bar, column visibility menu, search + status filter, MRR sparkline cell. URL state for sort/filter/page; deterministic 12% bulk-action failure path.
+15. № 015 `layouts/settings-shell` — Long-scroll typeset settings document with sticky section nav. Six sections (Profile / Workspace / Billing / Members / API keys / Danger zone). Real autosave state machine (clean → dirty → saving → saved → error), scroll-spy with URL hash, ⌘S keybinding, dirty-form guard, two-step type-to-confirm on destructive actions.
+16. № 016 `dashboards/notifications-feed` — Single-column activity feed grouped by day with sticky day headers (1px shadow on stick). Read state encoded by glyph weight (filled vs hollow), not color. J/K nav with row scroll-into-view; per-row click opens a right-placement drawer; filter chips with accent strip; mark-all-read with in-flight state.
 
-**Medical SaaS — 16 plates**, № 014–029. Categories: `layouts` (chart-header, care-team-rail, bed-board), `dashboards` (vitals-monitor, triage-queue, critical-alerts), `clinical` (medication-list, lab-results, intake-soap-note, appointment-week, order-entry, encounter-timeline, discharge-summary, mar, problem-list), `empty-states` (no-encounters-yet). The full section now ships at THE MEDICAL STANDARD bar (see `DECISIONS.md` 2026-05-05 medical-version entry) — refinement pass landed across the prior 13 plates and three new plates were built head-to-head against the bar from first commit:
+**Medical SaaS — 16 plates**, № 017–032. Categories: `layouts` (chart-header, care-team-rail, bed-board), `dashboards` (vitals-monitor, triage-queue, critical-alerts), `clinical` (medication-list, lab-results, intake-soap-note, appointment-week, order-entry, encounter-timeline, discharge-summary, mar, problem-list), `empty-states` (no-encounters-yet). The full section now ships at THE MEDICAL STANDARD bar (see `DECISIONS.md` 2026-05-05 medical-version entry) — refinement pass landed across the prior 13 plates and three new plates were built head-to-head against the bar from first commit:
 
 - № 027 `clinical/mar` (Medication Administration Record) — nurse's working surface as a time-grid (rows = meds, columns = 2-hour slots). Beat the row-timeline alternative in head-to-head. High-alert flags, missed-dose chip, NOW-column hairline, 2-nurse-verify with witness selector for high-alert charting; keyboard arrow nav across the grid; Enter on a scheduled cell opens chart-this-dose.
 - № 028 `dashboards/critical-alerts` — cross-patient feed of unread abnormal results. Beat the master-detail result-inbox alternative in head-to-head. Severity by SHAPE (panic 6px + tick / critical 4px / high 2px), 15-min critical-call countdown chip, J/K nav, ack/escalate/forward.

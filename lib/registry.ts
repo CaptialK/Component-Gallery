@@ -241,6 +241,48 @@ export const REGISTRY: ComponentEntry[] = [
     firstImpression: "2026-05-05",
     load: () => import("@/components/showcase/forms/api-keys"),
   },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "data-table",
+    title: "Data table",
+    filename: "data-table.tsx",
+    description:
+      "Spreadsheet-density ledger of customer accounts. Sticky head + first column, sortable columns, multi-row selection, bulk-action toolbar, column visibility menu, search + status filter, pagination, MRR sparkline cell.",
+    layout: "specimen",
+    aspectRatio: "16 / 10",
+    maxWidth: 1100,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/dashboards/data-table"),
+  },
+  {
+    domain: "saas",
+    category: "layouts",
+    slug: "settings-shell",
+    title: "Settings shell",
+    filename: "settings-shell.tsx",
+    description:
+      "Long-scroll typeset settings document with sticky section nav. Real validation per field, autosave with retry, scroll-spy section state, dirty-form guard, two-step destructive zone.",
+    layout: "specimen",
+    aspectRatio: "16 / 10",
+    maxWidth: 1080,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/layouts/settings-shell"),
+  },
+  {
+    domain: "saas",
+    category: "dashboards",
+    slug: "notifications-feed",
+    title: "Notifications feed",
+    filename: "notifications-feed.tsx",
+    description:
+      "Single-column activity feed with sticky day headers. J/K nav, mark-read on focus, filter chips, archive + mute affordances, mark-all-read.",
+    layout: "specimen",
+    aspectRatio: "5 / 6",
+    maxWidth: 720,
+    firstImpression: "2026-05-05",
+    load: () => import("@/components/showcase/dashboards/notifications-feed"),
+  },
 
   // ────────────────────────────────────────────────────────────────────
   //  Medical SaaS — clinical-product surfaces
